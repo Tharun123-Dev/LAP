@@ -210,35 +210,52 @@ export default function PayrollRuns() {
                     ))}
                   </tr>
                 </thead>
-                <tbody>
-                  {detail.entries.map((e, i) => (
-                    <tr key={e.id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
-                      <td style={td}>
-                        <p style={{ margin: 0, fontWeight: 600, color: '#111' }}>{e.employee_name}</p>
-                        <p style={{ margin: 0, color: '#aaa', fontSize: '10px' }}>{e.emp_code}</p>
-                      </td>
-                      <td style={td}>{e.present_days}/{e.working_days}</td>
-                      <td style={td}>
-                        <span style={{ color: parseFloat(e.lop_days) > 0 ? '#dc2626' : '#aaa' }}>
-                          {e.lop_days}
-                        </span>
-                      </td>
-                      <td style={td}>{fmt(e.gross)}</td>
-                      <td style={{ ...td, color: '#dc2626' }}>{fmt(e.total_deductions)}</td>
-                      <td style={{ ...td, fontWeight: 700, color: '#16a34a' }}>{fmt(e.net_pay)}</td>
-                      <td style={td}>
-                        {detail.run.status !== 'locked' && can('process_payroll') && (
-                          <button
-                            onClick={() => { setAdjEntry(e); setAdjForm({ type: 'bonus', amount: '', reason: '' }) }}
-                            style={{ padding: '4px 10px', background: '#eff6ff', color: '#1d4ed8', border: 'none', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
-                          >
-                            + Adjust
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+              
+<tbody>
+  {detail.entries.map((e, i) => (
+    <tr key={e.id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
+      <td style={td}>
+        <p style={{ margin: 0, fontWeight: 600, color: '#111', fontSize: '13px' }}>{e.employee_name}</p>
+        <p style={{ margin: 0, color: '#aaa', fontSize: '10px' }}>{e.emp_code} · {e.department}</p>
+      </td>
+      <td style={td}>{e.present_days}/{e.working_days}</td>
+      <td style={td}>
+        <span style={{
+          color: parseFloat(e.lop_days) > 0 ? '#dc2626' : '#aaa',
+          fontWeight: parseFloat(e.lop_days) > 0 ? 700 : 400,
+        }}>
+          {e.lop_days}
+        </span>
+        {parseFloat(e.lop_deduction) > 0 && (
+          <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#dc2626' }}>
+            −₹{parseFloat(e.lop_deduction).toLocaleString('en-IN')}
+          </p>
+        )}
+      </td>
+      <td style={td}>{fmt(e.gross)}</td>
+      <td style={td}>
+        <p style={{ margin: 0, color: '#dc2626' }}>{fmt(e.total_deductions)}</p>
+        <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#aaa' }}>
+          PF:{fmt(e.pf_employee)} TDS:{fmt(e.tds)}
+        </p>
+      </td>
+      <td style={{ ...td, fontWeight: 700, color: '#16a34a' }}>{fmt(e.net_pay)}</td>
+      <td style={td}>
+        {detail.run.status !== 'locked' && can('process_payroll') && (
+          <button
+            onClick={() => {
+              setAdjEntry(e)
+              setAdjForm({ type: 'bonus', amount: '', reason: '' })
+            }}
+            style={{ padding: '4px 10px', background: '#eff6ff', color: '#1d4ed8', border: 'none', borderRadius: '6px', fontSize: '11px', cursor: 'pointer', fontWeight: 600 }}
+          >
+            + Adjust
+          </button>
+        )}
+      </td>
+    </tr>
+  ))}
+</tbody>
               </table>
             </div>
           </div>

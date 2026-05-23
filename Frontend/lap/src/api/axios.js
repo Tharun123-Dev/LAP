@@ -1,8 +1,10 @@
+// src/api/axios.js
 import axios from 'axios'
-import ENDPOINTS from './endpoints'
+
+const BASE_URL = 'http://localhost:8000/api'
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api',
+  baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 })
 
@@ -16,17 +18,38 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config
-    if (error.response?.status === 401 && !original._retry) {
+    // Only retry once, only on 401, not on the refresh call itself
+    if (
+      error.response?.status === 401 &&
+      !original._retry &&
+      !original.url?.includes('/auth/token/refresh/')
+    ) {
       original._retry = true
       try {
         const refresh = localStorage.getItem('refresh')
-        const res = await axios.post(ENDPOINTS.AUTH.REFRESH, { refresh })
-        localStorage.setItem('access', res.data.access)
-        original.headers.Authorization = `Bearer ${res.data.access}`
+        if (!refresh) throw new Error('No refresh token')
+
+        // Use raw axios (not api instance) to avoid interceptor loop
+        const res = await axios.post(
+          `${BASE_URL}/auth/token/refresh/`,
+          { refresh },
+          { headers: { 'Content-Type': 'application/json' } }
+        )
+
+        const newAccess = res.data.access
+        localStorage.setItem('access', newAccess)
+
+        // If refresh token was rotated, store new one
+        if (res.data.refresh) {
+          localStorage.setItem('refresh', res.data.refresh)
+        }
+
+        original.headers.Authorization = `Bearer ${newAccess}`
         return api(original)
       } catch {
         localStorage.clear()
         window.location.href = '/login'
+        return Promise.reject(error)
       }
     }
     return Promise.reject(error)

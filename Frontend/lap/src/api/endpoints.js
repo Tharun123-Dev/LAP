@@ -71,6 +71,11 @@ LEAVE: {
 
   MY_PAYSLIPS:      `${BASE}/payroll/payslips/`,
   PAYSLIP:(m,y)     => `${BASE}/payroll/payslips/${m}/${y}/`,
+  // Inside PAYROLL object in endpoints.js — add these:
+MY_DEDUCTIONS:          `${BASE}/payroll/deductions/mine/`,
+EMP_DEDUCTIONS: (id)  => `${BASE}/payroll/deductions/employee/${id}/`,
+DEDUCTION_SUMMARY:      `${BASE}/payroll/deductions/summary/`,
+DASHBOARD_STATS:        `${BASE}/payroll/dashboard-stats/`,
 },
   REPORTS: {
     ATTENDANCE: `${BASE}/reports/attendance/`,

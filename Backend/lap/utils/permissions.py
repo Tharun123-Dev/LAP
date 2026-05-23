@@ -24,8 +24,7 @@ def make_permission(code):
     return DynamicPermission
 
 
-# ── Alias so any file still importing HasPermission won't crash ──
-# HasPermission is now just make_permission
+# Alias kept for backward compat
 HasPermission = make_permission
 
 

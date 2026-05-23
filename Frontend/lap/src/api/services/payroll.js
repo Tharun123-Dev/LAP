@@ -19,3 +19,8 @@ export const addAdjustmentApi    = (id, data) => api.post(ENDPOINTS.PAYROLL.ENTR
 
 export const getMyPayslipsApi    = ()         => api.get(ENDPOINTS.PAYROLL.MY_PAYSLIPS)
 export const getPayslipDetailApi = (m, y)     => api.get(ENDPOINTS.PAYROLL.PAYSLIP(m, y))
+// Add to src/api/services/payroll.js
+export const getMyDeductionsApi    = (year)      => api.get(ENDPOINTS.PAYROLL.MY_DEDUCTIONS, { params: { year } })
+export const getEmpDeductionsApi   = (id, year)  => api.get(ENDPOINTS.PAYROLL.EMP_DEDUCTIONS(id), { params: { year } })
+export const getDeductionSummaryApi = (month, year) => api.get(ENDPOINTS.PAYROLL.DEDUCTION_SUMMARY, { params: { month, year } })
+export const getDashboardStatsApi  = ()          => api.get(ENDPOINTS.PAYROLL.DASHBOARD_STATS)

@@ -17,6 +17,7 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
     # Read fields — flattened from related user
+    user_id        = serializers.IntegerField(source='user.id', read_only=True)
     username       = serializers.CharField(source='user.username',       read_only=True)
     first_name     = serializers.CharField(source='user.first_name',     read_only=True)
     last_name      = serializers.CharField(source='user.last_name',      read_only=True)
@@ -30,7 +31,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model  = EmployeeProfile
         fields = [
-            'id', 'emp_code', 'username', 'first_name', 'last_name',
+            'id', 'user_id','emp_code', 'username', 'first_name', 'last_name',
             'email', 'role', 'employee_type', 'is_active',
             'department', 'department_name', 'designation',
             'date_of_birth', 'joining_date', 'phone', 'address',

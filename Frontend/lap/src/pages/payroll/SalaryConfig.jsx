@@ -51,6 +51,11 @@ export default function SalaryConfig() {
     ? structures.filter(s => s.employee === parseInt(empFilter))
     : structures
 
+  const empLabel = (e) =>
+    (e.first_name || e.last_name)
+      ? `${e.first_name} ${e.last_name}`.trim()
+      : e.username
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
@@ -59,7 +64,9 @@ export default function SalaryConfig() {
           <select value={empFilter} onChange={e => setEmpFilter(e.target.value)} style={sel}>
             <option value="">All Employees</option>
             {employees.map(e => (
-              <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.emp_code})</option>
+              <option key={e.user_id} value={e.user_id}>
+                {empLabel(e)} ({e.emp_code})
+              </option>
             ))}
           </select>
           <button onClick={() => { setForm(EMPTY); setShowForm(true) }} style={btnPrimary}>
@@ -87,7 +94,7 @@ export default function SalaryConfig() {
                 <tr key={s.id} style={{ borderTop: '1px solid #f1f5f9', background: i % 2 === 0 ? '#fff' : '#fafafa' }}>
                   <td style={td}>
                     <p style={{ margin: 0, fontWeight: 600, color: '#111' }}>{s.employee_name}</p>
-                    <p style={{ margin: 0, fontSize: '11px', color: '#aaa' }}>{s.emp_code}</p>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#aaa' }}>{s.emp_code || '—'}</p>
                   </td>
                   <td style={td}>{s.effective_date}</td>
                   <td style={td}>{fmt(s.ctc)}</td>
@@ -116,7 +123,9 @@ export default function SalaryConfig() {
                   <select value={form.employee} onChange={set('employee')} style={inp}>
                     <option value="">Select employee</option>
                     {employees.map(e => (
-                      <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.emp_code})</option>
+                      <option key={e.user_id} value={e.user_id}>
+                        {empLabel(e)} ({e.emp_code})
+                      </option>
                     ))}
                   </select>
                 </F>

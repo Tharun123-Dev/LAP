@@ -3,20 +3,33 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import generics
 
-# ✅ make_permission only — no HasPermission
-from utils.permissions import make_permission
+from utils.permissions import make_permission, IsSuperAdmin, IsAuthenticatedUser
 from .models import Permission, RolePermission
 from .serializers import PermissionSerializer
+
+
+class CanManagePermissions(IsSuperAdmin):
+    """Allows superadmin OR any role with manage_permissions grant."""
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.user.role == 'superadmin':
+            return True
+        return RolePermission.objects.filter(
+            role=request.user.role,
+            permission__code='manage_permissions',
+            is_granted=True
+        ).exists()
 
 
 class PermissionListView(generics.ListAPIView):
     queryset = Permission.objects.all()
     serializer_class = PermissionSerializer
-    permission_classes = [make_permission('manage_permissions')]
+    permission_classes = [CanManagePermissions]
 
 
 class AllRolesPermissionsView(APIView):
-    permission_classes = [make_permission('manage_permissions')]
+    permission_classes = [CanManagePermissions]
 
     def get(self, request):
         roles = ['superadmin', 'admin', 'manager', 'hr', 'employee']
@@ -44,7 +57,7 @@ class AllRolesPermissionsView(APIView):
 
 
 class UpdateRolePermissionsView(APIView):
-    permission_classes = [make_permission('manage_permissions')]
+    permission_classes = [CanManagePermissions]
 
     def post(self, request, role):
         granted = request.data.get('granted', [])

@@ -34,7 +34,6 @@ class SalaryStructureListView(APIView):
 
         return Response(SalaryStructureSerializer(qs, many=True).data)
 
-
 class CreateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 
@@ -48,15 +47,25 @@ class CreateSalaryStructureView(APIView):
         except User.DoesNotExist:
             return Response({'error': 'Employee not found'}, status=404)
 
-        # Deactivate old structure
+        decimal_fields = [
+            'ctc', 'basic', 'hra', 'da', 'special_allowance',
+            'transport', 'medical', 'other_allowance',
+            'pf_employee', 'esi_employee', 'pt',
+            'pf_employer', 'esi_employer',
+        ]
+        data = request.data.copy()
+        for field in decimal_fields:
+            if data.get(field) == '' or data.get(field) is None:
+                data[field] = '0'
+
         SalaryStructure.objects.filter(employee=emp, is_active=True).update(is_active=False)
 
-        serializer = SalaryStructureSerializer(data=request.data)
+        serializer = SalaryStructureSerializer(data=data)
         if serializer.is_valid():
             serializer.save(created_by=request.user)
             return Response(serializer.data, status=201)
         return Response(serializer.errors, status=400)
-
+    
 
 class UpdateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
@@ -82,10 +91,9 @@ class MySalaryStructureView(APIView):
         ).order_by('-effective_date').first()
 
         if not structure:
-            return Response({'detail': 'No salary structure assigned yet'}, status=404)
+            return Response(None, status=200)
 
         return Response(SalaryStructureSerializer(structure).data)
-
 
 # ── PAYROLL RUNS ──────────────────────────────────────────────────────────────
 
@@ -338,4 +346,413 @@ class PayrollRegisterView(APIView):
             'run':     PayrollRunSerializer(run).data,
             'summary': summary,
             'entries': data,
+        })
+# Add these new views at the bottom of payroll/views.py
+
+# ── DEDUCTION HISTORY — MY OWN ────────────────────────────────────────────────
+
+class MyDeductionHistoryView(APIView):
+    """
+    Employee sees their own deduction history across all months.
+    Shows every deduction type per month with totals.
+    """
+    permission_classes = [make_permission('view_payslip')]
+
+    def get(self, request):
+        year = request.query_params.get('year', date.today().year)
+
+        entries = PayrollEntry.objects.filter(
+            employee             = request.user,
+            payroll_run__status  = 'locked',
+            payroll_run__year    = year,
+        ).select_related('payroll_run').order_by(
+            'payroll_run__year', 'payroll_run__month'
+        )
+
+        history = []
+        for e in entries:
+            run = e.payroll_run
+            history.append({
+                'month':          run.month,
+                'year':           run.year,
+                'gross':          float(e.gross),
+                'present_days':   float(e.present_days),
+                'working_days':   int(e.working_days),
+                'lop_days':       float(e.lop_days),
+                'ot_hours':       float(e.ot_hours),
+                'ot_pay':         float(e.ot_pay),
+                # Every deduction broken out
+                'pf_employee':    float(e.pf_employee),
+                'esi_employee':   float(e.esi_employee),
+                'pt':             float(e.pt),
+                'tds':            float(e.tds),
+                'lop_deduction':  float(e.lop_deduction),
+                'total_deductions': float(e.total_deductions),
+                'net_pay':        float(e.net_pay),
+                # Adjustments
+                'adjustments': [
+                    {
+                        'type':   adj.type,
+                        'amount': float(adj.amount),
+                        'reason': adj.reason,
+                    }
+                    for adj in e.adjustments.all()
+                ],
+            })
+
+        # YTD totals
+        ytd = {
+            'gross':           sum(h['gross']           for h in history),
+            'net_pay':         sum(h['net_pay']         for h in history),
+            'pf_employee':     sum(h['pf_employee']     for h in history),
+            'esi_employee':    sum(h['esi_employee']    for h in history),
+            'pt':              sum(h['pt']              for h in history),
+            'tds':             sum(h['tds']             for h in history),
+            'lop_deduction':   sum(h['lop_deduction']   for h in history),
+            'total_deductions':sum(h['total_deductions']for h in history),
+            'lop_days':        sum(h['lop_days']        for h in history),
+            'ot_hours':        sum(h['ot_hours']        for h in history),
+            'ot_pay':          sum(h['ot_pay']          for h in history),
+            'months_paid':     len(history),
+        }
+
+        return Response({'year': year, 'ytd': ytd, 'history': history})
+
+
+# ── DEDUCTION HISTORY — BY EMPLOYEE (Admin/HR) ────────────────────────────────
+
+class EmployeeDeductionHistoryView(APIView):
+    """
+    Admin/HR sees any employee's full deduction history.
+    Also supports comparing multiple employees side by side.
+    """
+    permission_classes = [make_permission('view_payroll')]
+
+    def get(self, request, emp_id):
+        year = request.query_params.get('year', date.today().year)
+
+        try:
+            emp = User.objects.get(pk=emp_id)
+        except User.DoesNotExist:
+            return Response({'error': 'Employee not found'}, status=404)
+
+        entries = PayrollEntry.objects.filter(
+            employee            = emp,
+            payroll_run__status = 'locked',
+            payroll_run__year   = year,
+        ).select_related('payroll_run', 'salary_structure').order_by(
+            'payroll_run__year', 'payroll_run__month'
+        )
+
+        history = []
+        for e in entries:
+            run = e.payroll_run
+            history.append({
+                'entry_id':      e.id,
+                'month':         run.month,
+                'year':          run.year,
+                'gross':         float(e.gross),
+                'present_days':  float(e.present_days),
+                'working_days':  int(e.working_days),
+                'lop_days':      float(e.lop_days),
+                'ot_hours':      float(e.ot_hours),
+                'ot_pay':        float(e.ot_pay),
+                'pf_employee':   float(e.pf_employee),
+                'esi_employee':  float(e.esi_employee),
+                'pt':            float(e.pt),
+                'tds':           float(e.tds),
+                'lop_deduction': float(e.lop_deduction),
+                'total_deductions': float(e.total_deductions),
+                'net_pay':       float(e.net_pay),
+                'adjustments': [
+                    {
+                        'type':   adj.type,
+                        'amount': float(adj.amount),
+                        'reason': adj.reason,
+                    }
+                    for adj in e.adjustments.all()
+                ],
+            })
+
+        ytd = {
+            'gross':            sum(h['gross']            for h in history),
+            'net_pay':          sum(h['net_pay']          for h in history),
+            'pf_employee':      sum(h['pf_employee']      for h in history),
+            'esi_employee':     sum(h['esi_employee']     for h in history),
+            'pt':               sum(h['pt']               for h in history),
+            'tds':              sum(h['tds']              for h in history),
+            'lop_deduction':    sum(h['lop_deduction']    for h in history),
+            'total_deductions': sum(h['total_deductions'] for h in history),
+            'lop_days':         sum(h['lop_days']         for h in history),
+            'ot_hours':         sum(h['ot_hours']         for h in history),
+            'ot_pay':           sum(h['ot_pay']           for h in history),
+            'months_paid':      len(history),
+        }
+
+        return Response({
+            'employee': {
+                'id':       emp.id,
+                'name':     emp.get_full_name() or emp.username,
+                'email':    emp.email,
+                'role':     emp.role,
+                'emp_type': emp.employee_type,
+                'emp_code': getattr(getattr(emp, 'profile', None), 'emp_code', ''),
+            },
+            'year':    year,
+            'ytd':     ytd,
+            'history': history,
+        })
+
+
+# ── ALL EMPLOYEES DEDUCTION SUMMARY (Admin/HR) ────────────────────────────────
+
+class AllDeductionSummaryView(APIView):
+    """
+    Admin/HR dashboard — summary of all employees' deductions
+    for a given month/year. Good for spotting high LOP, TDS anomalies.
+    """
+    permission_classes = [make_permission('view_payroll')]
+
+    def get(self, request):
+        month = int(request.query_params.get('month', date.today().month))
+        year  = int(request.query_params.get('year',  date.today().year))
+
+        entries = PayrollEntry.objects.filter(
+            payroll_run__month  = month,
+            payroll_run__year   = year,
+            payroll_run__status = 'locked',
+        ).select_related(
+            'employee',
+            'employee__profile',
+            'employee__profile__department',
+        ).order_by('employee__first_name')
+
+        data = []
+        for e in entries:
+            try:
+                emp_code = e.employee.profile.emp_code
+                dept     = e.employee.profile.department.name \
+                           if e.employee.profile.department else '—'
+            except Exception:
+                emp_code = ''
+                dept     = '—'
+
+            data.append({
+                'emp_id':        e.employee.id,
+                'emp_code':      emp_code,
+                'name':          e.employee.get_full_name() or e.employee.username,
+                'department':    dept,
+                'present_days':  float(e.present_days),
+                'working_days':  int(e.working_days),
+                'lop_days':      float(e.lop_days),
+                'ot_hours':      float(e.ot_hours),
+                'gross':         float(e.gross),
+                'pf_employee':   float(e.pf_employee),
+                'esi_employee':  float(e.esi_employee),
+                'pt':            float(e.pt),
+                'tds':           float(e.tds),
+                'lop_deduction': float(e.lop_deduction),
+                'total_deductions': float(e.total_deductions),
+                'net_pay':       float(e.net_pay),
+                'has_lop':       e.lop_days > 0,
+                'has_ot':        e.ot_hours > 0,
+            })
+
+        # Org summary
+        summary = {
+            'total_employees':   len(data),
+            'employees_with_lop': sum(1 for d in data if d['has_lop']),
+            'employees_with_ot':  sum(1 for d in data if d['has_ot']),
+            'total_gross':        sum(d['gross']            for d in data),
+            'total_net':          sum(d['net_pay']          for d in data),
+            'total_pf':           sum(d['pf_employee']      for d in data),
+            'total_esi':          sum(d['esi_employee']     for d in data),
+            'total_tds':          sum(d['tds']              for d in data),
+            'total_lop':          sum(d['lop_deduction']    for d in data),
+            'total_deductions':   sum(d['total_deductions'] for d in data),
+            'total_lop_days':     sum(d['lop_days']         for d in data),
+        }
+
+        return Response({
+            'month':   month,
+            'year':    year,
+            'summary': summary,
+            'entries': data,
+        })
+
+
+# ── DASHBOARD STATS API ───────────────────────────────────────────────────────
+
+class DashboardStatsView(APIView):
+    """
+    Returns role-appropriate stats for the dashboard home.
+    Employee: their own attendance + leave + last payslip
+    Admin/HR: org-wide headcount + payroll + leave stats
+    """
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        from attendance.models import AttendanceRecord
+        from leave.models import LeaveRequest, LeaveBalance
+        from employees.models import EmployeeProfile
+
+        today = date.today()
+        role  = request.user.role
+
+        if role in ('admin', 'superadmin', 'hr'):
+            return self._admin_stats(request, today)
+        elif role == 'manager':
+            return self._manager_stats(request, today)
+        else:
+            return self._employee_stats(request, today)
+
+    def _employee_stats(self, request, today):
+        from attendance.models import AttendanceRecord
+        from leave.models import LeaveRequest, LeaveBalance
+
+        # This month attendance
+        att = AttendanceRecord.objects.filter(
+            employee    = request.user,
+            date__year  = today.year,
+            date__month = today.month,
+        )
+        present = att.filter(status__in=['present', 'late']).count()
+        absent  = att.filter(status='absent').count()
+        lop     = att.filter(status='absent').count() + \
+                  att.filter(status='half_day').count() * 0.5
+
+        # Today
+        today_att = att.filter(date=today).first()
+
+        # Leave balances
+        balances = LeaveBalance.objects.filter(
+            employee = request.user,
+            year     = today.year,
+        ).select_related('leave_type')
+
+        # Pending leave requests
+        pending_leaves = LeaveRequest.objects.filter(
+            employee = request.user,
+            status   = 'pending',
+        ).count()
+
+        # Last payslip
+        last_payslip = PayrollEntry.objects.filter(
+            employee            = request.user,
+            payroll_run__status = 'locked',
+        ).select_related('payroll_run').order_by(
+            '-payroll_run__year', '-payroll_run__month'
+        ).first()
+
+        return Response({
+            'role': 'employee',
+            'attendance': {
+                'present_this_month': present,
+                'absent_this_month':  absent,
+                'lop_this_month':     lop,
+                'today_checked_in':   bool(today_att and today_att.check_in),
+                'today_checked_out':  bool(today_att and today_att.check_out),
+                'today_status':       today_att.status if today_att else 'not_started',
+            },
+            'leave': {
+                'pending_requests': pending_leaves,
+                'balances': [
+                    {
+                        'name':      b.leave_type.name,
+                        'code':      b.leave_type.code,
+                        'remaining': float(b.remaining),
+                        'total':     float(b.total),
+                    }
+                    for b in balances
+                ],
+            },
+            'last_payslip': {
+                'month':             last_payslip.payroll_run.month if last_payslip else None,
+                'year':              last_payslip.payroll_run.year  if last_payslip else None,
+                'net_pay':           float(last_payslip.net_pay)          if last_payslip else 0,
+                'gross':             float(last_payslip.gross)            if last_payslip else 0,
+                'lop_days':          float(last_payslip.lop_days)         if last_payslip else 0,
+                'lop_deduction':     float(last_payslip.lop_deduction)    if last_payslip else 0,
+                'pf':                float(last_payslip.pf_employee)      if last_payslip else 0,
+                'tds':               float(last_payslip.tds)              if last_payslip else 0,
+                'total_deductions':  float(last_payslip.total_deductions) if last_payslip else 0,
+            },
+        })
+
+    def _admin_stats(self, request, today):
+        from employees.models import EmployeeProfile
+        from attendance.models import AttendanceRecord
+        from leave.models import LeaveRequest
+
+        total_emp   = User.objects.filter(is_active=True).count()
+        total_dept  = EmployeeProfile.objects.values(
+            'department'
+        ).distinct().count()
+
+        today_att   = AttendanceRecord.objects.filter(date=today)
+        checked_in  = today_att.filter(check_in__isnull=False).count()
+
+        pending_leaves = LeaveRequest.objects.filter(status='pending').count()
+
+        last_run = PayrollRun.objects.order_by(
+            '-year', '-month'
+        ).first()
+
+        last_run_data = None
+        if last_run:
+            entries = PayrollEntry.objects.filter(payroll_run=last_run)
+            last_run_data = {
+                'month':          last_run.month,
+                'year':           last_run.year,
+                'status':         last_run.status,
+                'total_net':      float(sum(e.net_pay         for e in entries)),
+                'total_gross':    float(sum(e.gross           for e in entries)),
+                'total_pf':       float(sum(e.pf_employee     for e in entries)),
+                'total_tds':      float(sum(e.tds             for e in entries)),
+                'total_lop':      float(sum(e.lop_deduction   for e in entries)),
+                'employees_paid': entries.filter(
+                    payroll_run__status='locked'
+                ).count(),
+                'employees_lop':  entries.filter(lop_days__gt=0).count(),
+            }
+
+        return Response({
+            'role': 'admin',
+            'headcount': {
+                'total_employees':    total_emp,
+                'total_departments':  total_dept,
+                'checked_in_today':   checked_in,
+                'pending_leaves':     pending_leaves,
+            },
+            'last_payroll': last_run_data,
+        })
+
+    def _manager_stats(self, request, today):
+        from attendance.models import AttendanceRecord
+        from leave.models import LeaveRequest
+
+        # Manager's team — employees where manager = request.user
+        team_ids = User.objects.filter(
+            profile__manager = request.user
+        ).values_list('id', flat=True)
+
+        today_att  = AttendanceRecord.objects.filter(
+            date=today, employee_id__in=team_ids
+        )
+        checked_in = today_att.filter(check_in__isnull=False).count()
+        absent     = len(team_ids) - checked_in
+
+        pending = LeaveRequest.objects.filter(
+            employee_id__in = team_ids,
+            status          = 'pending',
+        ).count()
+
+        return Response({
+            'role': 'manager',
+            'team': {
+                'total':           len(team_ids),
+                'checked_in_today': checked_in,
+                'absent_today':    absent,
+                'pending_leaves':  pending,
+            },
         })

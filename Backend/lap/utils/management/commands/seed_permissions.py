@@ -3,49 +3,49 @@ from django.core.management.base import BaseCommand
 from utils.models import Permission, RolePermission
 
 ALL_PERMISSIONS = [
-    # Users / Employees
-    ('view_users',           'View all users'),
-    ('create_employee',      'Create employee'),
-    ('edit_employee',        'Edit employee'),
-    ('delete_employee',      'Deactivate employee'),
-    ('view_employees',       'View employees list'),
-    ('manage_permissions',   'Manage role permissions'),
+    # code,                  label,                            module
+    ('view_users',           'View all users',                 'users'),
+    ('create_user',          'Create user',                    'users'),
+    ('edit_user',            'Edit user',                      'users'),
+    ('create_employee',      'Create employee',                'employees'),
+    ('edit_employee',        'Edit employee',                  'employees'),
+    ('delete_employee',      'Deactivate employee',            'employees'),
+    ('view_employees',       'View employees list',            'employees'),
+    ('manage_permissions',   'Manage role permissions',        'settings'),
 
-    # Departments
-    ('view_departments',     'View departments'),
-    ('create_department',    'Create department'),
-    ('edit_department',      'Edit department'),
-    ('delete_department',    'Delete department'),
+    ('view_departments',     'View departments',               'departments'),
+    ('create_department',    'Create department',              'departments'),
+    ('edit_department',      'Edit department',                'departments'),
+    ('delete_department',    'Delete department',              'departments'),
 
-    # Attendance
-    ('view_attendance',      'View own attendance'),
-    ('view_team_attendance', 'View team attendance'),
-    ('approve_regularize',   'Approve regularization requests'),
-    ('manage_settings',      'Manage system settings'),
+    ('view_attendance',      'View own attendance',            'attendance'),
+    ('view_team_attendance', 'View team attendance',           'attendance'),
+    ('approve_regularize',   'Approve regularization',         'attendance'),
+    ('manage_settings',      'Manage system settings',         'settings'),
 
-    # Leave
-    ('view_leave',           'View own leave'),
-    ('apply_leave',          'Apply for leave'),
-    ('cancel_leave',         'Cancel leave request'),
-    ('view_all_leave',       'View all leave requests'),
-    ('approve_leave',        'Approve/reject leave'),
-    ('configure_leave',      'Configure leave types'),
+    ('view_leave',           'View own leave',                 'leave'),
+    ('apply_leave',          'Apply for leave',                'leave'),
+    ('cancel_leave',         'Cancel leave request',           'leave'),
+    ('view_all_leave',       'View all leave requests',        'leave'),
+    ('approve_leave',        'Approve/reject leave',           'leave'),
+    ('configure_leave',      'Configure leave types',          'leave'),
 
-    # Payroll
-    ('view_salary',          'View salary structures'),
-    ('configure_salary',     'Create and edit salary structures'),
-    ('view_payroll',         'View payroll runs and entries'),
-    ('process_payroll',      'Create and process payroll runs'),
-    ('approve_payroll',      'Approve and lock payroll'),
-    ('view_payslip',         'View own payslip'),
+    ('view_salary',          'View salary structures',         'payroll'),
+    ('configure_salary',     'Create and edit salary',         'payroll'),
+    ('view_payroll',         'View payroll runs',              'payroll'),
+    ('process_payroll',      'Create and process payroll',     'payroll'),
+    ('approve_payroll',      'Approve and lock payroll',       'payroll'),
+    ('view_payslip',         'View own payslip',               'payroll'),
 
-    # Reports
-    ('view_reports',         'View reports'),
-    ('export_reports',       'Export reports'),
+    ('view_reports',         'View reports',                   'reports'),
+    ('export_reports',       'Export reports',                 'reports'),
 ]
 
+ALL_CODES = [p[0] for p in ALL_PERMISSIONS]
+
 ROLE_DEFAULTS = {
-    'admin': [p[0] for p in ALL_PERMISSIONS],
+    'superadmin': ALL_CODES,
+    'admin':      ALL_CODES,
 
     'manager': [
         'view_employees', 'view_departments',
@@ -80,22 +80,16 @@ class Command(BaseCommand):
         parser.add_argument(
             '--reset-roles',
             action='store_true',
-            help='Reset role permissions to defaults',
+            help='Reset role permissions to defaults (sets is_granted correctly)',
         )
 
     def handle(self, *args, **options):
-        # Step 1 — detect correct field name (code vs codename)
-        perm_fields = [f.name for f in Permission._meta.get_fields()]
-        code_field  = 'codename' if 'codename' in perm_fields else 'code'
-        self.stdout.write(f'Using field: Permission.{code_field}')
-
-        # Step 2 — create all permissions
+        # ── Step 1: Create / update Permission rows ──────────────────────
         created_count = 0
-        for code, description in ALL_PERMISSIONS:
-            lookup   = {code_field: code}
-            defaults = {'description': description}
-            _, created = Permission.objects.get_or_create(
-                **lookup, defaults=defaults
+        for code, label, module in ALL_PERMISSIONS:
+            _, created = Permission.objects.update_or_create(
+                code=code,
+                defaults={'label': label, 'module': module},
             )
             if created:
                 created_count += 1
@@ -105,43 +99,34 @@ class Command(BaseCommand):
             f'✓ Permissions: {created_count} new, {Permission.objects.count()} total'
         ))
 
-        # Step 3 — assign role defaults
+        # ── Step 2: Optionally clear existing role permissions ────────────
         if options['reset_roles']:
             RolePermission.objects.all().delete()
             self.stdout.write('  Cleared existing role permissions')
 
-        # Detect RolePermission fields
-        rp_fields = [f.name for f in RolePermission._meta.get_fields()]
-        self.stdout.write(f'RolePermission fields: {rp_fields}')
+        # ── Step 3: Seed RolePermission with is_granted=True ─────────────
+        rp_created = rp_updated = 0
+        all_roles = ['superadmin', 'admin', 'manager', 'hr', 'employee']
 
-        rp_created = 0
-        for role, codes in ROLE_DEFAULTS.items():
-            for code in codes:
+        for role in all_roles:
+            granted_codes = set(ROLE_DEFAULTS.get(role, []))
+            for code, _, _ in ALL_PERMISSIONS:
                 try:
-                    perm_lookup = {code_field: code}
-                    perm = Permission.objects.get(**perm_lookup)
-
-                    # Build RolePermission lookup based on actual fields
-                    if 'role' in rp_fields and 'permission' in rp_fields:
-                        _, created = RolePermission.objects.get_or_create(
-                            role=role, permission=perm
-                        )
-                    elif 'role' in rp_fields and 'permission_id' in rp_fields:
-                        _, created = RolePermission.objects.get_or_create(
-                            role=role, permission_id=perm.id
-                        )
-                    else:
-                        self.stdout.write(self.style.WARNING(
-                            f'  ⚠ Unknown RolePermission structure: {rp_fields}'
-                        ))
-                        break
-
+                    perm = Permission.objects.get(code=code)
+                    should_grant = code in granted_codes
+                    obj, created = RolePermission.objects.update_or_create(
+                        role=role,
+                        permission=perm,
+                        defaults={'is_granted': should_grant},
+                    )
                     if created:
                         rp_created += 1
-
+                    else:
+                        rp_updated += 1
                 except Permission.DoesNotExist:
                     self.stdout.write(self.style.WARNING(f'  ⚠ Not found: {code}'))
 
         self.stdout.write(self.style.SUCCESS(
-            f'✓ Role permissions: {rp_created} new\n'
+            f'✓ Role permissions: {rp_created} created, {rp_updated} updated\n'
         ))
+        self.stdout.write(self.style.SUCCESS('✓ All permissions seeded correctly!'))
