@@ -1,0 +1,20 @@
+# leave/urls.py
+from django.urls import path
+from .views import (
+    LeaveTypeListCreateView, LeaveTypeDetailView,
+    MyLeaveBalanceView, InitBalanceView,
+    ApplyLeaveView, MyLeaveRequestsView, CancelLeaveView,
+    AllLeaveRequestsView, LeaveActionView,
+)
+
+urlpatterns = [
+    path('leave/types/',                   LeaveTypeListCreateView.as_view()),
+    path('leave/types/<int:pk>/',          LeaveTypeDetailView.as_view()),
+    path('leave/balance/',                 MyLeaveBalanceView.as_view()),
+    path('leave/balance/init/',            InitBalanceView.as_view()),
+    path('leave/apply/',                   ApplyLeaveView.as_view()),
+    path('leave/my/',                      MyLeaveRequestsView.as_view()),
+    path('leave/<int:pk>/cancel/',         CancelLeaveView.as_view()),
+    path('leave/all/',                     AllLeaveRequestsView.as_view()),
+    path('leave/<int:pk>/action/',         LeaveActionView.as_view()),
+]
