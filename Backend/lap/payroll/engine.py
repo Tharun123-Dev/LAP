@@ -1,13 +1,15 @@
-# payroll/engine.py
+# payroll/engine.py  — COMPLETE REPLACEMENT
 """
-Payroll calculation engine — fixed version.
-- LOP pulled from both attendance AND approved leave (LOP type)
-- Superadmin excluded only if no salary structure
-- All deductions properly calculated
+Fixed payroll engine:
+1. Approved non-LOP leave days → counted as PRESENT (paid leave)
+2. Absent days (no record, no leave) → LOP
+3. LOP approved leave → deducted properly
+4. Payslip shows correct present_days / lop_days
+5. Net pay = Gross - (PF + ESI + PT + TDS + LOP_deduction)
 """
 import calendar
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date
+from datetime import date, timedelta
 
 from accounts.models import User
 from attendance.models import AttendanceRecord
@@ -18,87 +20,138 @@ from .models import SalaryStructure, PayrollRun, PayrollEntry
 ROUND2 = lambda v: Decimal(v).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
 def get_active_structure(employee, as_of_date):
     return SalaryStructure.objects.filter(
         employee=employee,
         is_active=True,
-        effective_date__lte=as_of_date
+        effective_date__lte=as_of_date,
     ).order_by('-effective_date').first()
 
 
 def calculate_working_days(year, month):
+    """Returns (working_days, total_days_in_month). Mon-Fri only."""
     _, days_in_month = calendar.monthrange(year, month)
-    count = 0
-    for d in range(1, days_in_month + 1):
-        if date(year, month, d).weekday() < 5:
-            count += 1
-    return count, days_in_month
-
-
-def get_lop_from_leave(employee, year, month):
-    """
-    Count LOP days from approved leave requests of type LOP
-    that fall within the given month.
-    """
-    try:
-        lop_type = LeaveType.objects.get(code='LOP')
-    except LeaveType.DoesNotExist:
-        return Decimal('0')
-
-    requests = LeaveRequest.objects.filter(
-        employee=employee,
-        leave_type=lop_type,
-        status='approved',
-        start_date__year=year,
-        start_date__month=month,
+    working = sum(
+        1 for d in range(1, days_in_month + 1)
+        if date(year, month, d).weekday() < 5
     )
+    return working, days_in_month
 
-    total = Decimal('0')
-    for r in requests:
-        total += Decimal(str(r.days))
-    return total
+
+def get_approved_leave_dates(employee, year, month):
+    """
+    Returns two sets of date objects for the given month:
+      paid_leave_dates  — approved paid leave (CL, SL, EL, etc.) → count as present
+      lop_leave_dates   — approved LOP leave → count as LOP
+    """
+    start_of_month = date(year, month, 1)
+    end_of_month   = date(year, month, calendar.monthrange(year, month)[1])
+
+    approved = LeaveRequest.objects.filter(
+        employee=employee,
+        status='approved',
+        start_date__lte=end_of_month,
+        end_date__gte=start_of_month,
+    ).select_related('leave_type')
+
+    paid_dates = set()
+    lop_dates  = set()
+
+    for lr in approved:
+        cur = lr.start_date
+        while cur <= lr.end_date:
+            if cur.year == year and cur.month == month:
+                if lr.leave_type.code == 'LOP':
+                    lop_dates.add(cur)
+                else:
+                    paid_dates.add(cur)
+            cur += timedelta(days=1)
+
+    return paid_dates, lop_dates
 
 
 def get_attendance_summary(employee, year, month):
+    """
+    Builds a per-day picture of the month and returns:
+      present_days  — days physically present (including paid leave days)
+      lop_days      — days with no pay (absent + LOP leave)
+      ot_hours      — total OT hours
+    """
+    _, days_in_month   = calendar.monthrange(year, month)
+    working_days, _    = calculate_working_days(year, month)
+
+    # Fetch attendance records
     records = AttendanceRecord.objects.filter(
         employee=employee,
         date__year=year,
         date__month=month,
     )
+    record_map = {r.date: r for r in records}
+
+    # Fetch approved leave dates
+    paid_leave_dates, lop_leave_dates = get_approved_leave_dates(employee, year, month)
 
     present  = Decimal('0')
-    lop_att  = Decimal('0')   # LOP from attendance (absent/half-day)
+    lop      = Decimal('0')
     ot_hours = Decimal('0')
 
-    for r in records:
-        if r.status in ['present', 'late']:
-            present += Decimal('1')
-        elif r.status == 'half_day':
-            present  += Decimal('0.5')
-            lop_att  += Decimal('0.5')
-        elif r.status == 'absent':
-            lop_att  += Decimal('1')
-        elif r.status in ['leave', 'holiday', 'weekend']:
-            present  += Decimal('1')   # paid days
-        if r.ot_hours:
-            ot_hours += Decimal(str(r.ot_hours))
+    for day in range(1, days_in_month + 1):
+        d = date(year, month, day)
 
-    # Also add LOP from leave module
-    lop_leave = get_lop_from_leave(employee, year, month)
-    total_lop = lop_att + lop_leave
+        # Skip weekends
+        if d.weekday() >= 5:
+            continue
+
+        rec = record_map.get(d)
+
+        if rec:
+            # Real attendance record exists
+            if rec.status in ['present', 'late']:
+                present += Decimal('1')
+            elif rec.status == 'half_day':
+                present += Decimal('0.5')
+                lop     += Decimal('0.5')
+            elif rec.status == 'absent':
+                # Check if there's an approved paid leave for this day
+                if d in paid_leave_dates:
+                    present += Decimal('1')   # paid leave → present
+                elif d in lop_leave_dates:
+                    lop += Decimal('1')       # LOP leave → deduct
+                else:
+                    lop += Decimal('1')       # plain absent → LOP
+            elif rec.status in ['leave', 'holiday']:
+                present += Decimal('1')       # already marked leave/holiday → present
+
+            if rec.ot_hours:
+                ot_hours += Decimal(str(rec.ot_hours))
+
+        else:
+            # No record at all
+            if d in paid_leave_dates:
+                present += Decimal('1')   # approved paid leave → present (no record needed)
+            elif d in lop_leave_dates:
+                lop += Decimal('1')       # approved LOP → deduct
+            else:
+                lop += Decimal('1')       # no record, no leave → absent → LOP
 
     return {
-        'present':  present,
-        'lop_days': total_lop,
-        'ot_hours': ot_hours,
-        'has_records': records.exists(),
+        'present':     present,
+        'lop_days':    lop,
+        'ot_hours':    ot_hours,
+        'has_records': records.exists() or bool(paid_leave_dates) or bool(lop_leave_dates),
     }
 
 
-def prorate(amount, present_days, working_days):
+def prorate(amount, effective_present, working_days):
     if working_days == 0:
         return Decimal('0')
-    return ROUND2(Decimal(str(amount)) * Decimal(str(present_days)) / Decimal(str(working_days)))
+    return ROUND2(
+        Decimal(str(amount)) * Decimal(str(effective_present)) / Decimal(str(working_days))
+    )
 
 
 def calculate_ot_pay(basic, working_days, ot_hours):
@@ -108,6 +161,28 @@ def calculate_ot_pay(basic, working_days, ot_hours):
     return ROUND2(hourly * Decimal('1.5') * Decimal(str(ot_hours)))
 
 
+def calculate_tds(gross, emp_type):
+    """Simplified TDS calculation."""
+    if emp_type == 'contract':
+        return ROUND2(gross * Decimal('0.10'))
+    if emp_type in ['intern', 'parttime']:
+        return Decimal('0')
+    # Regular employee — annual slab
+    annual = gross * 12
+    if annual <= Decimal('250000'):
+        return Decimal('0')
+    elif annual <= Decimal('500000'):
+        return ROUND2((annual - Decimal('250000')) * Decimal('0.05') / 12)
+    elif annual <= Decimal('1000000'):
+        return ROUND2((Decimal('12500') + (annual - Decimal('500000')) * Decimal('0.20')) / 12)
+    else:
+        return ROUND2((Decimal('112500') + (annual - Decimal('1000000')) * Decimal('0.30')) / 12)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main engine
+# ─────────────────────────────────────────────────────────────────────────────
+
 def process_payroll_run(payroll_run: PayrollRun):
     month = payroll_run.month
     year  = payroll_run.year
@@ -115,17 +190,13 @@ def process_payroll_run(payroll_run: PayrollRun):
 
     working_days, days_in_month = calculate_working_days(year, month)
 
-    # All active employees (include all roles that have salary structures)
     employees = User.objects.filter(is_active=True)
-
-    created = []
-    skipped = []
+    created   = []
+    skipped   = []
 
     for emp in employees:
-        # Skip if entry already exists
-        if PayrollEntry.objects.filter(
-            payroll_run=payroll_run, employee=emp
-        ).exists():
+        # Skip existing entries
+        if PayrollEntry.objects.filter(payroll_run=payroll_run, employee=emp).exists():
             continue
 
         structure = get_active_structure(emp, as_of)
@@ -138,15 +209,13 @@ def process_payroll_run(payroll_run: PayrollRun):
         lop_days = att['lop_days']
         ot_hours = att['ot_hours']
 
-        # If no attendance records at all → full LOP month
-        if not att['has_records']:
-            lop_days = Decimal(str(working_days))
-            present  = Decimal('0')
+        # Effective present = working_days - lop_days (cannot go negative)
+        effective_present = max(
+            Decimal(str(working_days)) - lop_days,
+            Decimal('0')
+        )
 
-        # Effective present days for proration = working_days - lop_days
-        effective_present = max(Decimal(str(working_days)) - lop_days, Decimal('0'))
-
-        # Pro-rate all earnings
+        # Pro-rate all earnings based on effective present days
         basic     = prorate(structure.basic,             effective_present, working_days)
         hra       = prorate(structure.hra,               effective_present, working_days)
         da        = prorate(structure.da,                effective_present, working_days)
@@ -154,40 +223,23 @@ def process_payroll_run(payroll_run: PayrollRun):
         transport = prorate(structure.transport,         effective_present, working_days)
         medical   = prorate(structure.medical,           effective_present, working_days)
         other     = prorate(structure.other_allowance,   effective_present, working_days)
-
-        # OT pay
-        ot_pay = calculate_ot_pay(structure.basic, working_days, ot_hours)
+        ot_pay    = calculate_ot_pay(structure.basic, working_days, ot_hours)
 
         gross = basic + hra + da + special + transport + medical + other + ot_pay
 
-        # LOP deduction = per-day-gross × lop_days
+        # LOP deduction = (full monthly gross / working_days) × lop_days
+        # We use structure.gross (full month) so deduction is per-day of full salary
         per_day_gross = ROUND2(
             Decimal(str(structure.gross)) / Decimal(str(working_days))
         ) if working_days > 0 else Decimal('0')
         lop_deduction = ROUND2(per_day_gross * lop_days)
 
-        # Statutory deductions from salary structure (pre-configured)
-        pf_emp  = structure.pf_employee
-        esi_emp = structure.esi_employee
-        pt      = structure.pt
+        # Statutory deductions (from salary structure — fixed amounts)
+        pf_emp  = structure.pf_employee   # e.g. 12% of basic — set when creating structure
+        esi_emp = structure.esi_employee  # 0.75% of gross if gross <= 21000
+        pt      = structure.pt            # professional tax
 
-        # TDS — simplified
-        emp_type = emp.employee_type
-        if emp_type == 'contract':
-            tds = ROUND2(gross * Decimal('0.10'))
-        elif emp_type in ['intern', 'parttime']:
-            tds = Decimal('0')
-        else:
-            # Regular — basic annual TDS slab (simplified, no investment declaration)
-            annual_gross = gross * 12
-            if annual_gross <= Decimal('250000'):
-                tds = Decimal('0')
-            elif annual_gross <= Decimal('500000'):
-                tds = ROUND2((annual_gross - Decimal('250000')) * Decimal('0.05') / 12)
-            elif annual_gross <= Decimal('1000000'):
-                tds = ROUND2((Decimal('12500') + (annual_gross - Decimal('500000')) * Decimal('0.20')) / 12)
-            else:
-                tds = ROUND2((Decimal('112500') + (annual_gross - Decimal('1000000')) * Decimal('0.30')) / 12)
+        tds = calculate_tds(gross, emp.employee_type)
 
         total_deductions = ROUND2(pf_emp + esi_emp + pt + tds + lop_deduction)
         net_pay          = ROUND2(gross - total_deductions)

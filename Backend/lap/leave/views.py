@@ -223,6 +223,20 @@ class CancelLeaveView(APIView):
         except LeaveBalance.DoesNotExist:
             pass
 
+        # Revert attendance written on approval: mark those days absent
+        # so payroll sees them as LOP (leave is void, employee didn't work).
+        if old_status == 'approved':
+            from datetime import timedelta
+            from attendance.models import AttendanceRecord
+            current = leave.start_date
+            while current <= leave.end_date:
+                if current.weekday() < 5:
+                    AttendanceRecord.objects.filter(
+                        employee=leave.employee,
+                        date=current,
+                    ).update(status='absent', note='Leave cancelled — marked absent')
+                current += timedelta(days=1)
+
         return Response({'message': 'Leave request cancelled successfully'})
 
 
@@ -270,8 +284,8 @@ class LeaveActionView(APIView):
                 status=400
             )
 
-        leave.status       = 'approved' if action == 'approve' else 'rejected'
-        leave.approved_by  = request.user
+        leave.status        = 'approved' if action == 'approve' else 'rejected'
+        leave.approved_by   = request.user
         leave.approver_note = note
         leave.save()
 
@@ -287,6 +301,67 @@ class LeaveActionView(APIView):
             balance.save()
         except LeaveBalance.DoesNotExist:
             pass
+
+        # ── Mark attendance records when leave is approved ──────────────────
+        # This ensures the payroll engine reads the correct attendance status.
+        #
+        # Paid leave  → status = 'leave'   (counts as present, 0 LOP)
+        # Unpaid/LOP  → status = 'absent'  (counts as LOP)
+        # Half-day    → status = 'half_day' (0.5 LOP)
+        if action == 'approve':
+            from datetime import timedelta
+            from attendance.models import AttendanceRecord
+
+            is_unpaid = (
+                not leave.leave_type.is_paid or
+                leave.leave_type.code == 'LOP'
+            )
+            is_half = leave.session in ('first_half', 'second_half')
+
+            if is_half:
+                att_status = 'half_day'
+            elif is_unpaid:
+                att_status = 'absent'
+            else:
+                att_status = 'leave'
+
+            note_text = f'Leave approved: {leave.leave_type.name}'
+
+            current = leave.start_date
+            while current <= leave.end_date:
+                # Only mark weekdays (engine only counts weekday LOP)
+                if current.weekday() < 5:
+                    AttendanceRecord.objects.update_or_create(
+                        employee=leave.employee,
+                        date=current,
+                        defaults={
+                            'status': att_status,
+                            'note':   note_text,
+                        }
+                    )
+                current += timedelta(days=1)
+
+        # On rejection: mark those days as absent so payroll deducts LOP.
+        # (Employee was absent; leave not granted = unpaid absence.)
+        if action == 'reject':
+            from datetime import timedelta
+            from attendance.models import AttendanceRecord
+
+            is_half = leave.session in ('first_half', 'second_half')
+            att_status = 'half_day' if is_half else 'absent'
+
+            current = leave.start_date
+            while current <= leave.end_date:
+                if current.weekday() < 5:
+                    AttendanceRecord.objects.update_or_create(
+                        employee=leave.employee,
+                        date=current,
+                        defaults={
+                            'status': att_status,
+                            'note':   f'Leave rejected: {leave.leave_type.name} — marked absent',
+                        }
+                    )
+                current += timedelta(days=1)
 
         return Response({
             'message': f'Leave {leave.status}',

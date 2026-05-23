@@ -138,6 +138,10 @@ class ProcessPayrollRunView(APIView):
             return Response({'error': 'Payroll is locked and cannot be reprocessed'}, status=400)
 
         with transaction.atomic():
+            # Clear existing entries so they can be recalculated fresh
+            if run.status == 'processed':
+                run.entries.all().delete()
+
             created, skipped = process_payroll_run(run)
             run.status       = 'processed'
             run.processed_by = request.user
@@ -209,7 +213,8 @@ class UpdatePayrollEntryView(APIView):
             if field in request.data:
                 setattr(entry, field, request.data[field])
 
-        # Recalculate totals
+        # Recalculate totals.
+        # Gross = full earnings (LOP is a deduction, NOT baked into gross).
         entry.gross = (
             entry.basic + entry.hra + entry.da +
             entry.special_allowance + entry.transport +
@@ -219,7 +224,7 @@ class UpdatePayrollEntryView(APIView):
             entry.pf_employee + entry.esi_employee +
             entry.pt + entry.tds + entry.lop_deduction
         )
-        entry.net_pay = entry.gross - entry.total_deductions
+        entry.net_pay = max(entry.gross - entry.total_deductions, Decimal('0'))
         entry.save()
 
         return Response(PayrollEntrySerializer(entry).data)
@@ -256,7 +261,7 @@ class AddAdjustmentView(APIView):
             entry.net_pay += amount
             entry.gross   += amount
         else:  # deduction
-            entry.net_pay        -= amount
+            entry.net_pay          = max(entry.net_pay - amount, Decimal('0'))
             entry.total_deductions += amount
         entry.save()
 

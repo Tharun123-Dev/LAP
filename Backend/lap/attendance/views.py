@@ -160,6 +160,14 @@ class TodayAttendanceView(APIView):
 
 
 # ── MY MONTHLY RECORDS ────────────────────────────────────────────────────────
+# attendance/views.py
+# ── REPLACE ONLY the MyAttendanceView class ──────────────────────────────────
+# This fix makes approved leave days show as 'leave' (purple LV) in the
+# monthly calendar even when no AttendanceRecord row exists for that day.
+
+import calendar as cal_mod
+from datetime import date, timedelta
+
 
 class MyAttendanceView(APIView):
     permission_classes = [IsAuthenticatedUser]
@@ -168,40 +176,95 @@ class MyAttendanceView(APIView):
         month = int(request.query_params.get('month', date.today().month))
         year  = int(request.query_params.get('year',  date.today().year))
 
+        # ── 1. Real attendance records ────────────────────────────────────
         records = AttendanceRecord.objects.filter(
             employee=request.user,
             date__year=year,
             date__month=month,
         ).order_by('date')
 
+        # ── 2. Approved leave requests that overlap this month ────────────
+        from leave.models import LeaveRequest
+        approved_leaves = LeaveRequest.objects.filter(
+            employee=request.user,
+            status='approved',
+            start_date__lte=date(year, month, cal_mod.monthrange(year, month)[1]),
+            end_date__gte=date(year, month, 1),
+        ).select_related('leave_type')
+
+        # Build a set of dates covered by approved leave
+        leave_dates = {}  # date_str -> leave_type_name
+        for lr in approved_leaves:
+            cur = lr.start_date
+            while cur <= lr.end_date:
+                if cur.year == year and cur.month == month:
+                    leave_dates[str(cur)] = lr.leave_type.name
+                cur += timedelta(days=1)
+
+        # ── 3. Holidays ───────────────────────────────────────────────────
         holidays = Holiday.objects.filter(
             date__year=year, date__month=month
         ).values('date', 'name')
 
-        # Summary counts
+        # ── 4. Build serialized records list ─────────────────────────────
+        # Convert existing records to dict keyed by date str
+        record_map = {str(r.date): r for r in records}
+        serialized = AttendanceRecordSerializer(records, many=True).data
+
+        # For approved leave days that have NO attendance record, inject
+        # a synthetic record so the calendar shows 'leave' status
+        existing_dates = set(record_map.keys())
+        for date_str, leave_name in leave_dates.items():
+            if date_str not in existing_dates:
+                # Synthetic record for the calendar
+                serialized_list = list(serialized)
+                serialized_list.append({
+                    'id':           None,
+                    'date':         date_str,
+                    'check_in':     None,
+                    'check_out':    None,
+                    'hours_worked': 0,
+                    'ot_hours':     0,
+                    'status':       'leave',
+                    'is_wfh':       False,
+                    'leave_name':   leave_name,
+                })
+                serialized = serialized_list
+            else:
+                # Record exists but mark it as leave if it was absent/not_started
+                r = record_map[date_str]
+                if r.status in ['absent', 'not_started']:
+                    r.status = 'leave'
+                    r.save()
+
+        # ── 5. Summary ────────────────────────────────────────────────────
+        # Re-count including injected leave days
+        status_counts = {}
+        for rec in serialized:
+            st = rec.get('status', 'absent')
+            status_counts[st] = status_counts.get(st, 0) + 1
+
         summary = {
-            'present':  records.filter(status='present').count(),
-            'absent':   records.filter(status='absent').count(),
-            'late':     records.filter(status='late').count(),
-            'half_day': records.filter(status='half_day').count(),
-            'leave':    records.filter(status='leave').count(),
-            'total_hours': float(
-                sum(r.hours_worked for r in records if r.hours_worked)
-            ),
-            'total_ot': float(
-                sum(r.ot_hours for r in records if r.ot_hours)
-            ),
+            'present':    status_counts.get('present', 0) + status_counts.get('late', 0),
+            'absent':     status_counts.get('absent', 0),
+            'late':       status_counts.get('late', 0),
+            'half_day':   status_counts.get('half_day', 0),
+            'leave':      status_counts.get('leave', 0),
+            'total_hours': float(sum(
+                r.hours_worked for r in records if r.hours_worked
+            )),
+            'total_ot': float(sum(
+                r.ot_hours for r in records if r.ot_hours
+            )),
         }
 
         return Response({
-            'month':     month,
-            'year':      year,
-            'summary':   summary,
-            'records':   AttendanceRecordSerializer(records, many=True).data,
-            'holidays':  list(holidays),
+            'month':    month,
+            'year':     year,
+            'summary':  summary,
+            'records':  serialized,
+            'holidays': list(holidays),
         })
-
-
 # ── ALL EMPLOYEES ATTENDANCE (Manager/HR/Admin) ───────────────────────────────
 
 class AllAttendanceView(APIView):
