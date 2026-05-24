@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     'attendance',
     'payroll',
     'utils',
+    'reports'
 ]
 AUTH_USER_MODEL = 'accounts.User'
 
