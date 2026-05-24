@@ -33,40 +33,86 @@ class SalaryStructureListView(APIView):
             qs = qs.filter(employee_id=emp_id)
 
         return Response(SalaryStructureSerializer(qs, many=True).data)
-
 class CreateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 
     def post(self, request):
         emp_id = request.data.get('employee')
+
         if not emp_id:
-            return Response({'error': 'employee is required'}, status=400)
+            return Response(
+                {'error': 'employee is required'},
+                status=400
+            )
 
         try:
             emp = User.objects.get(pk=emp_id)
+
         except User.DoesNotExist:
-            return Response({'error': 'Employee not found'}, status=404)
+            return Response(
+                {'error': 'Employee not found'},
+                status=404
+            )
 
-        decimal_fields = [
-            'ctc', 'basic', 'hra', 'da', 'special_allowance',
-            'transport', 'medical', 'other_allowance',
-            'pf_employee', 'esi_employee', 'pt',
-            'pf_employer', 'esi_employer',
-        ]
-        data = request.data.copy()
-        for field in decimal_fields:
-            if data.get(field) == '' or data.get(field) is None:
-                data[field] = '0'
+        data = {
+            k: (v if v != '' else '0')
+            for k, v in request.data.items()
+        }
 
-        SalaryStructure.objects.filter(employee=emp, is_active=True).update(is_active=False)
+        # ── CTC validation ─────────────────────────────
+        try:
+            ctc    = Decimal(str(data.get('ctc', 0)))
+            basic  = Decimal(str(data.get('basic', 0)))
+            hra    = Decimal(str(data.get('hra', 0)))
+            da     = Decimal(str(data.get('da', 0)))
+            sp     = Decimal(str(data.get('special_allowance', 0)))
+            tr     = Decimal(str(data.get('transport', 0)))
+            med    = Decimal(str(data.get('medical', 0)))
+            oth    = Decimal(str(data.get('other_allowance', 0)))
+
+            pf_er  = Decimal(str(data.get('pf_employer', 0)))
+            esi_er = Decimal(str(data.get('esi_employer', 0)))
+
+            gross_components = (
+                basic + hra + da + sp + tr + med + oth
+            )
+
+            total_ctc = gross_components + pf_er + esi_er
+
+            ctc_diff = abs(ctc - total_ctc)
+
+            ctc_warning = None
+
+            if ctc > 0 and ctc_diff > Decimal('100'):
+                ctc_warning = (
+                    f"CTC ₹{ctc} does not match "
+                    f"components total ₹{total_ctc}. "
+                    f"Difference: ₹{ctc_diff}"
+                )
+
+        except Exception:
+            ctc_warning = None
+
+        # deactivate old structure
+        SalaryStructure.objects.filter(
+            employee=emp,
+            is_active=True
+        ).update(is_active=False)
 
         serializer = SalaryStructureSerializer(data=data)
-        if serializer.is_valid():
-            serializer.save(created_by=request.user)
-            return Response(serializer.data, status=201)
-        return Response(serializer.errors, status=400)
-    
 
+        if serializer.is_valid():
+            obj = serializer.save(created_by=request.user)
+
+            resp = serializer.data
+
+            if ctc_warning:
+                resp = dict(resp)
+                resp['ctc_warning'] = ctc_warning
+
+            return Response(resp, status=201)
+
+        return Response(serializer.errors, status=400)
 class UpdateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 

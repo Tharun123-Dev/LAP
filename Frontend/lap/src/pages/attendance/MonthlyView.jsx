@@ -1,20 +1,18 @@
-// src/pages/attendance/MonthlyView.jsx  — COMPLETE REPLACEMENT
-// Fix: approved leave days now show as purple 'LV' badge in the calendar
-// Backend now injects synthetic 'leave' status records for approved leave days
-
+// src/pages/attendance/MonthlyView.jsx
 import { useEffect, useState } from 'react'
 import { getMyAttendanceApi } from '../../api/services/attendance'
 import RegularizeModal from './RegularizeModal'
 import toast from 'react-hot-toast'
 
 const STATUS_COLOR = {
-  present:  { bg: '#dcfce7', color: '#166534', label: 'P',  title: 'Present' },
-  late:     { bg: '#fef9c3', color: '#854d0e', label: 'L',  title: 'Late' },
-  half_day: { bg: '#fef3c7', color: '#92400e', label: 'H',  title: 'Half Day' },
-  absent:   { bg: '#fee2e2', color: '#991b1b', label: 'A',  title: 'Absent / LOP' },
-  leave:    { bg: '#ede9fe', color: '#5b21b6', label: 'LV', title: 'On Leave' },
-  holiday:  { bg: '#dbeafe', color: '#1e40af', label: 'PH', title: 'Holiday' },
-  weekend:  { bg: '#f3f4f6', color: '#9ca3af', label: 'W',  title: 'Weekend' },
+  present:   { bg: '#dcfce7', color: '#166534', label: 'P',   title: 'Present' },
+  late:      { bg: '#fef9c3', color: '#854d0e', label: 'L',   title: 'Late' },
+  half_day:  { bg: '#fef3c7', color: '#92400e', label: 'H',   title: 'Half Day' },
+  absent:    { bg: '#fee2e2', color: '#991b1b', label: 'A',   title: 'Absent / LOP' },
+  leave:     { bg: '#ede9fe', color: '#5b21b6', label: 'LV',  title: 'On Leave' },
+  lop_leave: { bg: '#fff1f2', color: '#be123c', label: 'LOP', title: 'LOP Leave' },
+  holiday:   { bg: '#dbeafe', color: '#1e40af', label: 'PH',  title: 'Holiday' },
+  weekend:   { bg: '#f3f4f6', color: '#9ca3af', label: 'W',   title: 'Weekend' },
 }
 
 export default function MonthlyView() {
@@ -48,50 +46,53 @@ export default function MonthlyView() {
     else setMonth(m => m + 1)
   }
 
-  // Build lookup maps
   const recordMap  = {}
   const holidayMap = {}
   data?.records?.forEach(r  => { recordMap[r.date]  = r })
   data?.holidays?.forEach(h => { holidayMap[h.date] = h.name })
 
-  // Calendar grid
-  const firstDay   = new Date(year, month - 1, 1).getDay()
-  const daysInMon  = new Date(year, month, 0).getDate()
-  const todayStr   = new Date().toISOString().split('T')[0]
+  const firstDay  = new Date(year, month - 1, 1).getDay()
+  const daysInMon = new Date(year, month, 0).getDate()
+  const todayStr  = new Date().toISOString().split('T')[0]
 
   const cells = []
   for (let i = 0; i < firstDay; i++) cells.push(null)
   for (let d = 1; d <= daysInMon; d++) cells.push(d)
 
   const monthName = new Date(year, month - 1).toLocaleString('en-IN', {
-    month: 'long', year: 'numeric'
+    month: 'long', year: 'numeric',
   })
+
+  // Summary pills config
+  const summaryPills = data?.summary ? [
+    { label: 'Present',   val: data.summary.present,                               color: '#16a34a' },
+    { label: 'Absent',    val: data.summary.absent,                                color: '#dc2626' },
+    { label: 'On Leave',  val: data.summary.leave    || 0,                         color: '#7c3aed' },
+    { label: 'LOP Leave', val: data.summary.lop_leave || 0,                        color: '#be123c' },
+    { label: 'Late',      val: data.summary.late,                                  color: '#d97706' },
+    { label: 'Half Day',  val: data.summary.half_day,                              color: '#b45309' },
+    { label: 'Total Hrs', val: (data.summary.total_hours?.toFixed(1) || '0.0') + 'h', color: '#1d4ed8' },
+    { label: 'OT Hrs',    val: (data.summary.total_ot?.toFixed(1)    || '0.0') + 'h', color: '#7c3aed' },
+  ] : []
 
   return (
     <div>
-      {/* Month navigation */}
+
+      {/* ── Month navigation ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <button onClick={prevMonth} style={navBtn}>◀</button>
         <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#111' }}>{monthName}</h3>
         <button onClick={nextMonth} style={navBtn}>▶</button>
       </div>
 
-      {/* Summary pills */}
-      {data?.summary && (
+      {/* ── Summary pills ── */}
+      {summaryPills.length > 0 && (
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginBottom: '20px' }}>
-          {[
-            { label: 'Present',  val: data.summary.present,  color: '#16a34a' },
-            { label: 'Absent',   val: data.summary.absent,   color: '#dc2626' },
-            { label: 'On Leave', val: data.summary.leave,    color: '#7c3aed' },
-            { label: 'Late',     val: data.summary.late,     color: '#d97706' },
-            { label: 'Half Day', val: data.summary.half_day, color: '#b45309' },
-            { label: 'Total Hrs',val: (data.summary.total_hours?.toFixed(1) || 0) + 'h', color: '#1d4ed8' },
-            { label: 'OT Hrs',   val: (data.summary.total_ot?.toFixed(1) || 0) + 'h',   color: '#7c3aed' },
-          ].map(s => (
+          {summaryPills.map(s => (
             <div key={s.label} style={{
               background: '#fff', border: '1px solid #e5e7eb',
               borderRadius: '8px', padding: '10px 16px',
-              display: 'flex', gap: '8px', alignItems: 'center'
+              display: 'flex', gap: '8px', alignItems: 'center',
             }}>
               <span style={{ fontSize: '18px', fontWeight: 700, color: s.color }}>{s.val}</span>
               <span style={{ fontSize: '12px', color: '#888' }}>{s.label}</span>
@@ -100,48 +101,67 @@ export default function MonthlyView() {
         </div>
       )}
 
-      {/* Calendar grid */}
+      {/* ── Calendar ── */}
       {loading ? (
-        <p style={{ color: '#888' }}>Loading...</p>
+        <div style={{ textAlign: 'center', padding: '60px', color: '#888' }}>Loading...</div>
       ) : (
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+
           {/* Day headers */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid #e5e7eb' }}>
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
               <div key={d} style={{
                 padding: '10px', textAlign: 'center',
-                fontSize: '12px', fontWeight: 600, color: '#888', background: '#f8fafc'
+                fontSize: '12px', fontWeight: 600, color: '#888', background: '#f8fafc',
               }}>{d}</div>
             ))}
           </div>
 
-          {/* Cells */}
+          {/* Day cells */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
             {cells.map((day, i) => {
-              if (!day) return (
-                <div key={`e-${i}`} style={emptyCell} />
-              )
+              if (!day) return <div key={`e-${i}`} style={emptyCell} />
 
-              const dateStr   = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+              const dateStr   = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
               const record    = recordMap[dateStr]
               const holiday   = holidayMap[dateStr]
               const dayOfWeek = new Date(dateStr).getDay()
               const isWeekend = dayOfWeek === 0 || dayOfWeek === 6
               const isToday   = dateStr === todayStr
+              const isFuture  = dateStr > todayStr
 
-              // Determine display status
+              // ── Detect missing checkout ──
+              // check_in exists but check_out is null/empty AND it's not today (today may still check out)
+              const missingCheckout = !!(
+                record?.check_in &&
+                !record?.check_out &&
+                dateStr !== todayStr
+              )
+
+              // ── Determine status to display ──
               let st = null
-              if (record)         st = STATUS_COLOR[record.status]
+              let effectiveStatus = record?.status
+
+              // If checkout is missing on a past day, override display to half_day/warning
+              if (missingCheckout) {
+                effectiveStatus = 'half_day'
+              }
+
+              if (record)         st = STATUS_COLOR[effectiveStatus] || STATUS_COLOR.absent
               else if (holiday)   st = STATUS_COLOR.holiday
               else if (isWeekend) st = STATUS_COLOR.weekend
 
-              // Tooltip: show leave name if available
-              const tooltipText = record?.leave_name
-                ? `On ${record.leave_name}`
-                : st?.title || ''
+              // ── Leave info ──
+              const isLop       = record?.status === 'lop_leave' || record?.is_lop
+              const leaveName   = record?.leave_name
 
-              // Only allow regularize on absent days (not leave/holiday/weekend)
-              const canRegularize = record && !isWeekend && !holiday && record.status === 'absent'
+              // ── Tooltip ──
+              let tooltipText = st?.title || ''
+              if (leaveName)        tooltipText = `${isLop ? 'LOP: ' : ''}${leaveName}`
+              if (missingCheckout)  tooltipText = `⚠ Check-out missing on ${dateStr}`
+
+              // ── Regularize: absent days only ──
+              const canRegularize = !!(record && !isWeekend && !holiday && record.status === 'absent' && !isFuture)
 
               return (
                 <div
@@ -149,19 +169,25 @@ export default function MonthlyView() {
                   title={tooltipText}
                   onClick={() => canRegularize && setSelRecord(record)}
                   style={{
-                    padding: '8px', minHeight: '70px',
+                    padding: '8px',
+                    minHeight: '76px',
                     borderRight: '1px solid #f1f5f9',
                     borderBottom: '1px solid #f1f5f9',
                     cursor: canRegularize ? 'pointer' : 'default',
-                    background: isToday ? '#eff6ff' : '#fff',
+                    background: isToday
+                      ? '#eff6ff'
+                      : missingCheckout
+                        ? '#fff7ed'   // soft orange tint for missing checkout days
+                        : '#fff',
                     position: 'relative',
+                    transition: 'background 0.15s',
                   }}
                 >
                   {/* Day number */}
                   <div style={{
                     width: '24px', height: '24px', borderRadius: '50%',
                     background: isToday ? '#1d4ed8' : 'transparent',
-                    color: isToday ? '#fff' : isWeekend ? '#9ca3af' : '#333',
+                    color: isToday ? '#fff' : isWeekend ? '#9ca3af' : isFuture ? '#bbb' : '#333',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '12px', fontWeight: isToday ? 700 : 400,
                     marginBottom: '4px',
@@ -171,7 +197,7 @@ export default function MonthlyView() {
 
                   {/* Holiday name */}
                   {holiday && (
-                    <p style={{ margin: 0, fontSize: '9px', color: '#1e40af', lineHeight: 1.2 }}>
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#1e40af', lineHeight: 1.2, fontWeight: 600 }}>
                       {holiday}
                     </p>
                   )}
@@ -187,17 +213,37 @@ export default function MonthlyView() {
                     </span>
                   )}
 
-                  {/* Leave name under badge */}
-                  {record?.leave_name && (
-                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#7c3aed', lineHeight: 1.2 }}>
-                      {record.leave_name}
+                  {/* Leave name */}
+                  {leaveName && (
+                    <p style={{
+                      margin: '2px 0 0', fontSize: '8px', lineHeight: 1.2,
+                      color: isLop ? '#be123c' : '#7c3aed', fontWeight: 500,
+                    }}>
+                      {leaveName}
                     </p>
                   )}
 
-                  {/* Check-in/out times */}
+                  {/* Check-in / check-out times */}
                   {record?.check_in && (
-                    <p style={{ margin: '3px 0 0', fontSize: '9px', color: '#888' }}>
-                      {record.check_in}{record.check_out ? ` → ${record.check_out}` : ' → ?'}
+                    <p style={{
+                      margin: '3px 0 0', fontSize: '9px',
+                      color: missingCheckout ? '#dc2626' : '#888',
+                      fontWeight: missingCheckout ? 600 : 400,
+                    }}>
+                      {record.check_in}
+                      {record.check_out
+                        ? ` → ${record.check_out}`
+                        : isToday
+                          ? ' → ?'
+                          : ' → ⚠ missing'
+                      }
+                    </p>
+                  )}
+
+                  {/* Missing checkout warning label */}
+                  {missingCheckout && (
+                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#ea580c', fontWeight: 600 }}>
+                      no checkout
                     </p>
                   )}
 
@@ -214,26 +260,33 @@ export default function MonthlyView() {
         </div>
       )}
 
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap' }}>
+      {/* ── Legend ── */}
+      <div style={{ display: 'flex', gap: '12px', marginTop: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
         {Object.entries(STATUS_COLOR).map(([key, val]) => (
           <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
             <span style={{
               width: '14px', height: '14px', borderRadius: '3px',
               background: val.bg, border: `1px solid ${val.color}`,
-              display: 'inline-block'
+              display: 'inline-block',
             }} />
-            <span style={{ fontSize: '11px', color: '#888', textTransform: 'capitalize' }}>
-              {val.title}
-            </span>
+            <span style={{ fontSize: '11px', color: '#888' }}>{val.title}</span>
           </div>
         ))}
-        <p style={{ fontSize: '11px', color: '#aaa', margin: 0, alignSelf: 'center' }}>
+        {/* Missing checkout legend item */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <span style={{
+            width: '14px', height: '14px', borderRadius: '3px',
+            background: '#fff7ed', border: '1px solid #ea580c',
+            display: 'inline-block',
+          }} />
+          <span style={{ fontSize: '11px', color: '#888' }}>No Checkout</span>
+        </div>
+        <p style={{ fontSize: '11px', color: '#aaa', margin: 0 }}>
           Tap an absent day to regularize
         </p>
       </div>
 
-      {/* Regularize modal */}
+      {/* ── Regularize modal ── */}
       {selRecord && (
         <RegularizeModal
           record={selRecord}
@@ -245,5 +298,5 @@ export default function MonthlyView() {
   )
 }
 
-const navBtn   = { background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '36px', height: '36px', cursor: 'pointer', fontSize: '14px' }
-const emptyCell = { padding: '10px', minHeight: '70px', borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9' }
+const navBtn    = { background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '36px', height: '36px', cursor: 'pointer', fontSize: '14px' }
+const emptyCell = { padding: '10px', minHeight: '76px', borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9' }

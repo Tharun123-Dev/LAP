@@ -24,6 +24,9 @@ def _get_status(check_in, check_out, hours_worked):
     """Determine attendance status from times."""
     if not check_in:
         return 'absent'
+    # checkout missing — incomplete, don't count as present yet
+    if not check_out:
+        return 'half_day'   # conservative: missing checkout = half day at best
     grace = datetime.combine(date.today(), SHIFT_START) + timedelta(minutes=GRACE_MINUTES)
     ci    = datetime.combine(date.today(), check_in)
     if hours_worked < Decimal('4.0'):
@@ -32,9 +35,7 @@ def _get_status(check_in, check_out, hours_worked):
         return 'late'
     return 'present'
 
-
 # ── CHECK-IN ──────────────────────────────────────────────────────────────────
-
 class CheckInView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
@@ -43,7 +44,6 @@ class CheckInView(APIView):
         is_wfh   = request.data.get('is_wfh', False)
         now_time = datetime.now().time()
 
-        # Check if already checked in today
         existing = AttendanceRecord.objects.filter(
             employee=request.user, date=today
         ).first()
@@ -57,7 +57,8 @@ class CheckInView(APIView):
         if existing:
             existing.check_in = now_time
             existing.is_wfh   = is_wfh
-            existing.status   = 'present'
+            existing.status   = 'half_day'   # incomplete until checkout
+            existing.note     = 'Checked in — awaiting checkout'
             existing.save()
             record = existing
         else:
@@ -66,7 +67,8 @@ class CheckInView(APIView):
                 date      = today,
                 check_in  = now_time,
                 is_wfh    = is_wfh,
-                status    = 'present',
+                status    = 'half_day',       # incomplete until checkout
+                note      = 'Checked in — awaiting checkout',
             )
 
         return Response({
@@ -102,16 +104,18 @@ class CheckOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Calculate hours
-        ci      = datetime.combine(today, record.check_in)
-        co      = datetime.combine(today, now_time)
-        diff    = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
-        ot      = max(diff - STANDARD_HOURS, Decimal('0'))
+        ci   = datetime.combine(today, record.check_in)
+        co   = datetime.combine(today, now_time)
+        diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
+        ot   = max(diff - STANDARD_HOURS, Decimal('0'))
 
         record.check_out    = now_time
         record.hours_worked = diff
         record.ot_hours     = ot
         record.status       = _get_status(record.check_in, now_time, diff)
+        # clear the awaiting-checkout note on successful checkout
+        if 'awaiting checkout' in (record.note or '').lower():
+            record.note = ''
         record.save()
 
         return Response({
@@ -122,7 +126,6 @@ class CheckOutView(APIView):
             'status':       record.status,
             'record':       AttendanceRecordSerializer(record).data,
         })
-
 
 # ── TODAY STATUS ──────────────────────────────────────────────────────────────
 
@@ -169,6 +172,12 @@ import calendar as cal_mod
 from datetime import date, timedelta
 
 
+# ── REPLACE ONLY the MyAttendanceView class ──────────────────────────────────
+
+import calendar as cal_mod
+from datetime import date, timedelta
+
+
 class MyAttendanceView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
@@ -192,13 +201,17 @@ class MyAttendanceView(APIView):
             end_date__gte=date(year, month, 1),
         ).select_related('leave_type')
 
-        # Build a set of dates covered by approved leave
-        leave_dates = {}  # date_str -> leave_type_name
+        # Build a map: date_str -> { name, is_lop }
+        leave_dates = {}
         for lr in approved_leaves:
+            is_lop = (not lr.leave_type.is_paid) or (lr.leave_type.code == 'LOP')
             cur = lr.start_date
             while cur <= lr.end_date:
                 if cur.year == year and cur.month == month:
-                    leave_dates[str(cur)] = lr.leave_type.name
+                    leave_dates[str(cur)] = {
+                        'name':   lr.leave_type.name,
+                        'is_lop': is_lop,
+                    }
                 cur += timedelta(days=1)
 
         # ── 3. Holidays ───────────────────────────────────────────────────
@@ -207,55 +220,54 @@ class MyAttendanceView(APIView):
         ).values('date', 'name')
 
         # ── 4. Build serialized records list ─────────────────────────────
-        # Convert existing records to dict keyed by date str
         record_map = {str(r.date): r for r in records}
-        serialized = AttendanceRecordSerializer(records, many=True).data
+        serialized = list(AttendanceRecordSerializer(records, many=True).data)
 
-        # For approved leave days that have NO attendance record, inject
-        # a synthetic record so the calendar shows 'leave' status
+        # Inject synthetic records for approved leave days with no attendance record
         existing_dates = set(record_map.keys())
-        for date_str, leave_name in leave_dates.items():
+
+        for date_str, leave_info in leave_dates.items():
+            status = 'lop_leave' if leave_info['is_lop'] else 'leave'
+
             if date_str not in existing_dates:
-                # Synthetic record for the calendar
-                serialized_list = list(serialized)
-                serialized_list.append({
+                # No attendance record — inject synthetic one
+                serialized.append({
                     'id':           None,
                     'date':         date_str,
                     'check_in':     None,
                     'check_out':    None,
                     'hours_worked': 0,
                     'ot_hours':     0,
-                    'status':       'leave',
+                    'status':       status,
                     'is_wfh':       False,
-                    'leave_name':   leave_name,
+                    'leave_name':   leave_info['name'],
+                    'is_lop':       leave_info['is_lop'],
                 })
-                serialized = serialized_list
             else:
-                # Record exists but mark it as leave if it was absent/not_started
-                r = record_map[date_str]
-                if r.status in ['absent', 'not_started']:
-                    r.status = 'leave'
-                    r.save()
+                # Attendance record exists — patch status and add leave info
+                for rec in serialized:
+                    if rec.get('date') == date_str:
+                        if rec.get('status') in ('absent', 'leave', 'not_started'):
+                            rec['status'] = status
+                        rec['leave_name'] = leave_info['name']
+                        rec['is_lop']     = leave_info['is_lop']
+                        break
 
         # ── 5. Summary ────────────────────────────────────────────────────
-        # Re-count including injected leave days
         status_counts = {}
         for rec in serialized:
             st = rec.get('status', 'absent')
             status_counts[st] = status_counts.get(st, 0) + 1
 
         summary = {
-            'present':    status_counts.get('present', 0) + status_counts.get('late', 0),
-            'absent':     status_counts.get('absent', 0),
-            'late':       status_counts.get('late', 0),
-            'half_day':   status_counts.get('half_day', 0),
-            'leave':      status_counts.get('leave', 0),
-            'total_hours': float(sum(
-                r.hours_worked for r in records if r.hours_worked
-            )),
-            'total_ot': float(sum(
-                r.ot_hours for r in records if r.ot_hours
-            )),
+            'present':     status_counts.get('present', 0) + status_counts.get('late', 0),
+            'absent':      status_counts.get('absent', 0),
+            'late':        status_counts.get('late', 0),
+            'half_day':    status_counts.get('half_day', 0),
+            'leave':       status_counts.get('leave', 0),
+            'lop_leave':   status_counts.get('lop_leave', 0),
+            'total_hours': float(sum(r.hours_worked for r in records if r.hours_worked)),
+            'total_ot':    float(sum(r.ot_hours     for r in records if r.ot_hours)),
         }
 
         return Response({

@@ -74,16 +74,34 @@ export default function MyRequests() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           {requests.map(req => {
-            const st        = STATUS[req.status] || STATUS.pending
-            const canCancel = req.status === 'pending' || (req.status === 'approved' && new Date(req.start_date) > new Date())
+            const st = STATUS[req.status] || STATUS.pending
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const startDate = new Date(req.start_date)
+
+            // Cancel allowed: pending always, approved only if leave hasn't started yet
+            const canCancel = req.status === 'pending' ||
+              (req.status === 'approved' && startDate > today)
 
             return (
-              <div key={req.id} style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', padding: '16px 20px', display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div
+                key={req.id}
+                style={{
+                  background: '#fff', borderRadius: '12px',
+                  border: '1px solid #e5e7eb', padding: '16px 20px',
+                  display: 'flex', flexWrap: 'wrap', gap: '16px',
+                  justifyContent: 'space-between', alignItems: 'flex-start',
+                }}
+              >
                 <div style={{ flex: 1, minWidth: '200px' }}>
                   {/* Header row */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
                     <span style={{ fontWeight: 700, fontSize: '14px', color: '#111' }}>{req.leave_type_name}</span>
-                    <span style={{ padding: '2px 10px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: st.bg, color: st.color, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{
+                      padding: '2px 10px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
+                      background: st.bg, color: st.color,
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                    }}>
                       <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: st.dot, display: 'inline-block' }} />
                       {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
                     </span>
@@ -93,15 +111,30 @@ export default function MyRequests() {
                   {/* Dates */}
                   <p style={{ margin: '0 0 4px', fontSize: '13px', color: '#333' }}>
                     📅 {req.start_date} {req.start_date !== req.end_date ? `→ ${req.end_date}` : ''}
-                    {req.session !== 'full' && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#6366f1', fontWeight: 500 }}>({req.session.replace('_', ' ')})</span>}
+                    {req.session !== 'full' && (
+                      <span style={{ marginLeft: '6px', fontSize: '11px', color: '#6366f1', fontWeight: 500 }}>
+                        ({req.session.replace('_', ' ')})
+                      </span>
+                    )}
                   </p>
 
                   {/* Reason */}
-                  <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>Reason: {req.reason}</p>
+                  <p style={{ margin: '0 0 4px', fontSize: '12px', color: '#888' }}>Reason: {req.reason}</p>
+
+                  {/* Approved by — shown for approved and rejected */}
+                  {req.approver_name && (
+                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#166534', fontWeight: 500 }}>
+                      ✅ {req.status === 'approved' ? 'Approved' : 'Reviewed'} by {req.approver_name}
+                    </p>
+                  )}
 
                   {/* Approver note */}
                   {req.approver_note && (
-                    <p style={{ margin: '4px 0 0', fontSize: '12px', color: req.status === 'approved' ? '#166534' : '#991b1b', fontStyle: 'italic' }}>
+                    <p style={{
+                      margin: '4px 0 0', fontSize: '12px',
+                      color: req.status === 'approved' ? '#166534' : '#991b1b',
+                      fontStyle: 'italic',
+                    }}>
                       💬 {req.approver_note}
                     </p>
                   )}
@@ -112,13 +145,27 @@ export default function MyRequests() {
                   <p style={{ margin: 0, fontSize: '11px', color: '#aaa' }}>
                     {new Date(req.applied_at).toLocaleDateString('en-IN')}
                   </p>
+
                   {canCancel && (
                     <button
                       onClick={() => handleCancel(req.id)}
-                      style={{ padding: '5px 12px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}
+                      style={{
+                        padding: '5px 12px',
+                        background: req.status === 'approved' ? '#fff7ed' : '#fee2e2',
+                        color: req.status === 'approved' ? '#c2410c' : '#dc2626',
+                        border: `1px solid ${req.status === 'approved' ? '#fed7aa' : '#fecaca'}`,
+                        borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                      }}
                     >
-                      Cancel
+                      {req.status === 'approved' ? 'Withdraw' : 'Cancel'}
                     </button>
+                  )}
+
+                  {/* Approved leave that has already started — no cancel, show locked state */}
+                  {req.status === 'approved' && !canCancel && (
+                    <span style={{ fontSize: '11px', color: '#6b7280', fontStyle: 'italic' }}>
+                      Leave in progress
+                    </span>
                   )}
                 </div>
               </div>

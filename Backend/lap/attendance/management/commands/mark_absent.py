@@ -2,21 +2,22 @@
 """
 Management command: mark_absent
 --------------------------------
-Marks every active employee who has NO attendance record for a given date
-as 'absent', so payroll engine counts it as LOP.
+Two jobs in one command (runs at midnight every weekday):
 
-Run at end of each working day via cron:
-    python manage.py mark_absent              # defaults to today
-    python manage.py mark_absent --date 2026-05-20  # specific date
+JOB 1 — Missing check-out (previous working day):
+  If an employee checked IN yesterday but never checked OUT,
+  their record stays incomplete. Mark them absent for TODAY
+  so payroll counts it as LOP. Also flag yesterday's record
+  with a note so HR can see it.
 
-Cron example (runs at 11:59 PM every weekday):
-    59 23 * * 1-5 /path/to/venv/bin/python /path/to/manage.py mark_absent
+JOB 2 — No check-in at all (today):
+  Employees with zero attendance record for today →
+  mark absent (existing logic).
 
-Skips:
-  - Weekends (Saturday/Sunday)
-  - Employees who already have any record for that date
-  - Employees with an approved leave covering that date
-    (those were already marked 'leave' or 'absent' by the leave approval)
+Cron (runs at 00:05 every weekday — just after midnight):
+    5 0 * * 1-5 /path/to/venv/bin/python /path/to/manage.py mark_absent
+
+Skips weekends, public holidays, employees on approved leave.
 """
 
 from datetime import date, timedelta
@@ -27,67 +28,117 @@ from attendance.models import AttendanceRecord, Holiday
 from leave.models import LeaveRequest
 
 
+def get_prev_working_day(d):
+    """Return the most recent weekday before d."""
+    prev = d - timedelta(days=1)
+    while prev.weekday() >= 5:
+        prev -= timedelta(days=1)
+    return prev
+
+
 class Command(BaseCommand):
-    help = 'Mark employees with no check-in as absent for a given date'
+    help = 'Auto-absent: missing check-out yesterday → absent today; no check-in today → absent today'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--date',
             type=str,
             default=None,
-            help='Date to mark (YYYY-MM-DD). Defaults to today.',
+            help='Date to process as TODAY (YYYY-MM-DD). Defaults to today.',
         )
 
     def handle(self, *args, **options):
-        raw = options.get('date')
-        target = date.fromisoformat(raw) if raw else date.today()
+        raw    = options.get('date')
+        today  = date.fromisoformat(raw) if raw else date.today()
+        yesterday = get_prev_working_day(today)
 
-        # Skip weekends
-        if target.weekday() >= 5:
-            self.stdout.write(f'{target} is a weekend — nothing to do.')
+        # Skip if today is weekend
+        if today.weekday() >= 5:
+            self.stdout.write(f'{today} is a weekend — nothing to do.')
             return
 
-        # Skip public holidays
-        if Holiday.objects.filter(date=target).exists():
-            self.stdout.write(f'{target} is a public holiday — nothing to do.')
+        # Skip if today is a public holiday
+        if Holiday.objects.filter(date=today).exists():
+            self.stdout.write(f'{today} is a public holiday — nothing to do.')
             return
 
         employees = User.objects.filter(is_active=True)
 
-        # Employees with an approved leave on this date
-        # (already handled by leave approval flow — skip them)
-        on_leave_ids = set(
+        # --- shared helpers --------------------------------------------------
+        on_leave_today = set(
             LeaveRequest.objects.filter(
                 status='approved',
-                start_date__lte=target,
-                end_date__gte=target,
+                start_date__lte=today,
+                end_date__gte=today,
             ).values_list('employee_id', flat=True)
         )
 
-        # Employees who already have a record for this date
-        already_marked_ids = set(
+        already_marked_today = set(
             AttendanceRecord.objects.filter(
-                date=target
+                date=today
             ).values_list('employee_id', flat=True)
         )
 
-        marked = 0
+        # ── JOB 1: missing check-out yesterday → mark absent TODAY ───────────
+        # Find yesterday's records that have check_in but no check_out
+        incomplete_yesterday = AttendanceRecord.objects.filter(
+            date=yesterday,
+            check_in__isnull=False,
+            check_out__isnull=True,
+            status__in=['present', 'late', 'half_day'],  # only real check-ins
+        ).select_related('employee')
+
+        job1_marked = 0
+        for rec in incomplete_yesterday:
+            emp = rec.employee
+            if not emp.is_active:
+                continue
+            if emp.id in on_leave_today:
+                continue
+            if emp.id in already_marked_today:
+                continue
+
+            # Flag yesterday's record so HR can see it
+            rec.note = (rec.note + ' | ' if rec.note else '') + \
+                       'CHECK-OUT MISSING — next day marked absent automatically'
+            rec.save(update_fields=['note'])
+
+            # Mark TODAY as absent
+            AttendanceRecord.objects.create(
+                employee=emp,
+                date=today,
+                status='absent',
+                note=f'Auto-absent: check-out missing on {yesterday}',
+            )
+            already_marked_today.add(emp.id)   # prevent JOB 2 double-marking
+            job1_marked += 1
+
+            self.stdout.write(
+                f'  [MISSING CHECKOUT] {emp.get_full_name() or emp.username} '
+                f'— checked in {yesterday} but no checkout → absent {today}'
+            )
+
+        # ── JOB 2: no check-in at all today → mark absent TODAY ─────────────
+        job2_marked = 0
         for emp in employees:
-            if emp.id in on_leave_ids:
-                continue        # leave approval already wrote the record
-            if emp.id in already_marked_ids:
-                continue        # already has a record (checked in, etc.)
+            if emp.id in on_leave_today:
+                continue
+            if emp.id in already_marked_today:
+                continue
 
             AttendanceRecord.objects.create(
                 employee=emp,
-                date=target,
+                date=today,
                 status='absent',
                 note='Auto-marked absent: no check-in recorded',
             )
-            marked += 1
+            job2_marked += 1
 
         self.stdout.write(
             self.style.SUCCESS(
-                f'{target}: {marked} employee(s) marked absent automatically.'
+                f'\n{today} done — '
+                f'{job1_marked} absent (missing checkout) + '
+                f'{job2_marked} absent (no check-in) = '
+                f'{job1_marked + job2_marked} total marked.'
             )
         )
