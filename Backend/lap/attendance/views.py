@@ -1,6 +1,7 @@
 # attendance/views.py
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+import calendar as cal_mod
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -15,18 +16,18 @@ from .serializers import (
     HolidaySerializer,
 )
 
-STANDARD_HOURS  = Decimal('8.0')
-GRACE_MINUTES   = 15
-SHIFT_START     = time(9, 0)   # 9:00 AM
+STANDARD_HOURS = Decimal('8.0')
+GRACE_MINUTES  = 15
+SHIFT_START    = time(9, 0)   # 9:00 AM
 
 
 def _get_status(check_in, check_out, hours_worked):
     """Determine attendance status from times."""
     if not check_in:
         return 'absent'
-    # checkout missing — incomplete, don't count as present yet
+    # checkout missing — treat as half_day until checkout happens
     if not check_out:
-        return 'half_day'   # conservative: missing checkout = half day at best
+        return 'half_day'
     grace = datetime.combine(date.today(), SHIFT_START) + timedelta(minutes=GRACE_MINUTES)
     ci    = datetime.combine(date.today(), check_in)
     if hours_worked < Decimal('4.0'):
@@ -35,7 +36,9 @@ def _get_status(check_in, check_out, hours_worked):
         return 'late'
     return 'present'
 
+
 # ── CHECK-IN ──────────────────────────────────────────────────────────────────
+
 class CheckInView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
@@ -113,7 +116,7 @@ class CheckOutView(APIView):
         record.hours_worked = diff
         record.ot_hours     = ot
         record.status       = _get_status(record.check_in, now_time, diff)
-        # clear the awaiting-checkout note on successful checkout
+        # Clear the awaiting-checkout note on successful checkout
         if 'awaiting checkout' in (record.note or '').lower():
             record.note = ''
         record.save()
@@ -126,6 +129,7 @@ class CheckOutView(APIView):
             'status':       record.status,
             'record':       AttendanceRecordSerializer(record).data,
         })
+
 
 # ── TODAY STATUS ──────────────────────────────────────────────────────────────
 
@@ -163,20 +167,6 @@ class TodayAttendanceView(APIView):
 
 
 # ── MY MONTHLY RECORDS ────────────────────────────────────────────────────────
-# attendance/views.py
-# ── REPLACE ONLY the MyAttendanceView class ──────────────────────────────────
-# This fix makes approved leave days show as 'leave' (purple LV) in the
-# monthly calendar even when no AttendanceRecord row exists for that day.
-
-import calendar as cal_mod
-from datetime import date, timedelta
-
-
-# ── REPLACE ONLY the MyAttendanceView class ──────────────────────────────────
-
-import calendar as cal_mod
-from datetime import date, timedelta
-
 
 class MyAttendanceView(APIView):
     permission_classes = [IsAuthenticatedUser]
@@ -185,14 +175,14 @@ class MyAttendanceView(APIView):
         month = int(request.query_params.get('month', date.today().month))
         year  = int(request.query_params.get('year',  date.today().year))
 
-        # ── 1. Real attendance records ────────────────────────────────────
+        # ── 1. Real attendance records ────────────────────────────────────────
         records = AttendanceRecord.objects.filter(
             employee=request.user,
             date__year=year,
             date__month=month,
         ).order_by('date')
 
-        # ── 2. Approved leave requests that overlap this month ────────────
+        # ── 2. Approved leave requests that overlap this month ────────────────
         from leave.models import LeaveRequest
         approved_leaves = LeaveRequest.objects.filter(
             employee=request.user,
@@ -214,20 +204,33 @@ class MyAttendanceView(APIView):
                     }
                 cur += timedelta(days=1)
 
-        # ── 3. Holidays ───────────────────────────────────────────────────
+        # ── 3. Holidays ───────────────────────────────────────────────────────
         holidays = Holiday.objects.filter(
             date__year=year, date__month=month
         ).values('date', 'name')
 
-        # ── 4. Build serialized records list ─────────────────────────────
+        # ── 4. Build serialized records list ──────────────────────────────────
         record_map = {str(r.date): r for r in records}
         serialized = list(AttendanceRecordSerializer(records, many=True).data)
+
+        # ── FIX: mark records with missing checkout as half_day in the response
+        # The DB already stores status='half_day' from check-in time, but
+        # hours_worked=0 and check_out=None. We explicitly set status='half_day'
+        # here so the summary correctly counts them and payroll sees the right value.
+        today_str = str(date.today())
+        for rec in serialized:
+            if (
+                rec.get('check_in') and
+                not rec.get('check_out') and
+                rec.get('date') != today_str   # today may still check out
+            ):
+                rec['status'] = 'half_day'
 
         # Inject synthetic records for approved leave days with no attendance record
         existing_dates = set(record_map.keys())
 
         for date_str, leave_info in leave_dates.items():
-            status = 'lop_leave' if leave_info['is_lop'] else 'leave'
+            leave_status = 'lop_leave' if leave_info['is_lop'] else 'leave'
 
             if date_str not in existing_dates:
                 # No attendance record — inject synthetic one
@@ -238,7 +241,7 @@ class MyAttendanceView(APIView):
                     'check_out':    None,
                     'hours_worked': 0,
                     'ot_hours':     0,
-                    'status':       status,
+                    'status':       leave_status,
                     'is_wfh':       False,
                     'leave_name':   leave_info['name'],
                     'is_lop':       leave_info['is_lop'],
@@ -248,12 +251,12 @@ class MyAttendanceView(APIView):
                 for rec in serialized:
                     if rec.get('date') == date_str:
                         if rec.get('status') in ('absent', 'leave', 'not_started'):
-                            rec['status'] = status
+                            rec['status'] = leave_status
                         rec['leave_name'] = leave_info['name']
                         rec['is_lop']     = leave_info['is_lop']
                         break
 
-        # ── 5. Summary ────────────────────────────────────────────────────
+        # ── 5. Summary ────────────────────────────────────────────────────────
         status_counts = {}
         for rec in serialized:
             st = rec.get('status', 'absent')
@@ -277,14 +280,16 @@ class MyAttendanceView(APIView):
             'records':  serialized,
             'holidays': list(holidays),
         })
+
+
 # ── ALL EMPLOYEES ATTENDANCE (Manager/HR/Admin) ───────────────────────────────
 
 class AllAttendanceView(APIView):
     permission_classes = [make_permission('view_team_attendance')]
 
     def get(self, request):
-        month = int(request.query_params.get('month', date.today().month))
-        year  = int(request.query_params.get('year',  date.today().year))
+        month  = int(request.query_params.get('month', date.today().month))
+        year   = int(request.query_params.get('year',  date.today().year))
         emp_id = request.query_params.get('employee')
 
         records = AttendanceRecord.objects.select_related(
@@ -305,11 +310,11 @@ class ApplyRegularizationView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def post(self, request):
-        record_id        = request.data.get('attendance_id')
-        reason           = request.data.get('reason', '').strip()
-        req_checkin      = request.data.get('requested_checkin')
-        req_checkout     = request.data.get('requested_checkout')
-        target_date_str  = request.data.get('date')   # NEW — allow date without record_id
+        record_id       = request.data.get('attendance_id')
+        reason          = request.data.get('reason', '').strip()
+        req_checkin     = request.data.get('requested_checkin')
+        req_checkout    = request.data.get('requested_checkout')
+        target_date_str = request.data.get('date')
 
         if not reason:
             return Response(
@@ -327,14 +332,11 @@ class ApplyRegularizationView(APIView):
                 return Response({'error': 'Record not found'}, status=404)
 
         elif target_date_str:
-            # Parse date
             try:
-                from datetime import date as date_type
-                target_date = date_type.fromisoformat(target_date_str)
+                target_date = date.fromisoformat(target_date_str)
             except ValueError:
                 return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
 
-            # Auto-create record for that date if missing
             record, created = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
                 date=target_date,
@@ -378,6 +380,7 @@ class ApplyRegularizationView(APIView):
             status=status.HTTP_201_CREATED
         )
 
+
 # ── REGULARIZATION — MY LIST ──────────────────────────────────────────────────
 
 class MyRegularizationsView(APIView):
@@ -403,7 +406,7 @@ class AllRegularizationsView(APIView):
         return Response(RegularizationSerializer(regs, many=True).data)
 
 
-# ── REGULARIZATION — APPROVE / REJECT ────────────────────────────────────────
+# ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
 
 class ApproveRegularizationView(APIView):
     permission_classes = [make_permission('approve_regularize')]

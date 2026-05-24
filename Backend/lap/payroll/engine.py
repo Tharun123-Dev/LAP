@@ -144,11 +144,24 @@ def get_attendance_summary(employee, year, month):
                 late_count += 1
 
             elif rec.status == 'half_day':
-                if d in paid_half_dates or d in paid_full_dates:
-                    present += Decimal('1')   # approved paid leave covers it
+                # KEY FIX: check_in with no check_out = missing checkout = 0.5 LOP
+                # Without this, missing checkout was treated the same as an approved
+                # paid half-day leave, giving full present credit and 0 LOP.
+                missing_checkout = bool(rec.check_in and not rec.check_out)
+                if missing_checkout:
+                    # Missing checkout: 0.5 LOP unless paid leave covers the day
+                    if d in paid_full_dates or d in paid_half_dates:
+                        present += Decimal('1')   # paid leave covers it
+                    else:
+                        present += Decimal('0.5')
+                        lop     += Decimal('0.5')  # 0.5 LOP deducted from salary
                 else:
-                    present += Decimal('0.5')
-                    lop     += Decimal('0.5')
+                    # Normal half-day (worked < 4h, checkout present)
+                    if d in paid_half_dates or d in paid_full_dates:
+                        present += Decimal('1')   # approved paid leave covers it
+                    else:
+                        present += Decimal('0.5')
+                        lop     += Decimal('0.5')
 
             elif rec.status == 'absent':
                 if d in paid_full_dates or d in paid_half_dates:

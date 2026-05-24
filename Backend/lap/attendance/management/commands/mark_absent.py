@@ -6,13 +6,12 @@ Two jobs in one command (runs at midnight every weekday):
 
 JOB 1 — Missing check-out (previous working day):
   If an employee checked IN yesterday but never checked OUT,
-  their record stays incomplete. Mark them absent for TODAY
-  so payroll counts it as LOP. Also flag yesterday's record
-  with a note so HR can see it.
+  update yesterday's record to status='half_day' and hours_worked=0
+  so payroll deducts exactly 0.5 LOP for that day.
 
 JOB 2 — No check-in at all (today):
   Employees with zero attendance record for today →
-  mark absent (existing logic).
+  mark absent so payroll counts it as 1 LOP.
 
 Cron (runs at 00:05 every weekday — just after midnight):
     5 0 * * 1-5 /path/to/venv/bin/python /path/to/manage.py mark_absent
@@ -37,7 +36,7 @@ def get_prev_working_day(d):
 
 
 class Command(BaseCommand):
-    help = 'Auto-absent: missing check-out yesterday → absent today; no check-in today → absent today'
+    help = 'Auto-mark: missing check-out yesterday → half_day (0.5 LOP); no check-in today → absent'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -48,8 +47,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        raw    = options.get('date')
-        today  = date.fromisoformat(raw) if raw else date.today()
+        raw       = options.get('date')
+        today     = date.fromisoformat(raw) if raw else date.today()
         yesterday = get_prev_working_day(today)
 
         # Skip if today is weekend
@@ -64,7 +63,7 @@ class Command(BaseCommand):
 
         employees = User.objects.filter(is_active=True)
 
-        # --- shared helpers --------------------------------------------------
+        # ── Shared helpers ────────────────────────────────────────────────────
         on_leave_today = set(
             LeaveRequest.objects.filter(
                 status='approved',
@@ -79,8 +78,10 @@ class Command(BaseCommand):
             ).values_list('employee_id', flat=True)
         )
 
-        # ── JOB 1: missing check-out yesterday → mark absent TODAY ───────────
-        # Find yesterday's records that have check_in but no check_out
+        # ── JOB 1: missing check-out yesterday → half_day on YESTERDAY ───────
+        # Find yesterday's records that have check_in but no check_out.
+        # FIX: We update YESTERDAY's record to half_day (0.5 LOP) instead of
+        # wrongly creating an absent record for today (which was double-penalising).
         incomplete_yesterday = AttendanceRecord.objects.filter(
             date=yesterday,
             check_in__isnull=False,
@@ -93,32 +94,27 @@ class Command(BaseCommand):
             emp = rec.employee
             if not emp.is_active:
                 continue
-            if emp.id in on_leave_today:
-                continue
-            if emp.id in already_marked_today:
-                continue
 
-            # Flag yesterday's record so HR can see it
+            # Update yesterday's record: half_day + zero hours.
+            # Payroll engine reads status='half_day' with no leave → 0.5 LOP deduction.
+            rec.status       = 'half_day'
+            rec.hours_worked = 0
             rec.note = (rec.note + ' | ' if rec.note else '') + \
-                       'CHECK-OUT MISSING — next day marked absent automatically'
-            rec.save(update_fields=['note'])
+                       'CHECK-OUT MISSING — auto-converted to half day (0.5 LOP)'
+            rec.save(update_fields=['status', 'hours_worked', 'note'])
 
-            # Mark TODAY as absent
-            AttendanceRecord.objects.create(
-                employee=emp,
-                date=today,
-                status='absent',
-                note=f'Auto-absent: check-out missing on {yesterday}',
-            )
-            already_marked_today.add(emp.id)   # prevent JOB 2 double-marking
+            # Prevent JOB 2 from marking this employee absent today
+            # (they may or may not come in today — that's a separate matter)
+            already_marked_today.add(emp.id)
             job1_marked += 1
 
             self.stdout.write(
                 f'  [MISSING CHECKOUT] {emp.get_full_name() or emp.username} '
-                f'— checked in {yesterday} but no checkout → absent {today}'
+                f'— checked in {yesterday} but no checkout '
+                f'→ half_day on {yesterday} (0.5 LOP)'
             )
 
-        # ── JOB 2: no check-in at all today → mark absent TODAY ─────────────
+        # ── JOB 2: no check-in at all today → mark absent TODAY ──────────────
         job2_marked = 0
         for emp in employees:
             if emp.id in on_leave_today:
@@ -137,8 +133,8 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f'\n{today} done — '
-                f'{job1_marked} absent (missing checkout) + '
-                f'{job2_marked} absent (no check-in) = '
+                f'{job1_marked} half_day (missing checkout on {yesterday}) + '
+                f'{job2_marked} absent (no check-in today) = '
                 f'{job1_marked + job2_marked} total marked.'
             )
         )
