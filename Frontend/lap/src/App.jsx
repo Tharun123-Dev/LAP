@@ -13,12 +13,13 @@ import DepartmentsPage   from './pages/departments/DepartmentsPage'
 import AttendancePage    from './pages/attendance/AttendancePage'
 import LeavePage         from './pages/leave/LeavePage'
 import PayrollPage       from './pages/payroll/PayrollPage'
-import ReportsPage       from './pages/reports/ReportsPage'
+
 import ProfileSettings   from './pages/settings/ProfileSettings'
 import SystemSettings    from './pages/settings/SystemSettings'
-import NotificationsPage from './pages/notifications/NotificationsPage'
-import ProtectedRoute    from './components/ProtectedRoute'
 
+import ProtectedRoute    from './components/ProtectedRoute'
+import ReportsPage from "./pages/reports/ReportsPage";
+import NotificationsPage from "./pages/notifications/NotificationsPage";
 export default function App() {
   return (
     <>
@@ -37,7 +38,7 @@ export default function App() {
           <Route path="leave"         element={<ProtectedRoute requiredPermission="view_leave"><LeavePage /></ProtectedRoute>} />
           <Route path="payroll"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
           <Route path="payslip"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
-          <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage /></ProtectedRoute>} />
+          <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage/></ProtectedRoute>} />
 
           {/* Notifications — all roles */}
           <Route path="notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
