@@ -13,8 +13,8 @@ import DepartmentsPage   from './pages/departments/DepartmentsPage'
 import AttendancePage    from './pages/attendance/AttendancePage'
 import LeavePage         from './pages/leave/LeavePage'
 import PayrollPage       from './pages/payroll/PayrollPage'
-import ReportsPage from './pages/reports/Reportspage';
-import NotificationsPage from './pages/notifications/Notificationspage';
+import ReportsPage from './pages/reports/ReportsMain';
+import NotificationsPage from './pages/notifications/NotificationsMain';
 import ProfileSettings   from './pages/settings/ProfileSettings'
 import SystemSettings    from './pages/settings/SystemSettings'
 
