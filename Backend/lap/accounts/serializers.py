@@ -46,3 +46,14 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         return obj.get_permissions_list()
+    
+# accounts/serializers.py  (add to existing file)
+from rest_framework import serializers
+from .models import CustomRole
+
+
+class CustomRoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = CustomRole
+        fields = ['id', 'name', 'display_name', 'level', 'base_role',
+                  'description', 'is_active', 'created_at']

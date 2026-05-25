@@ -1,33 +1,35 @@
-// src/pages/settings/SystemSettings.jsx
 import { useState, useEffect } from 'react'
 import { useSelector } from 'react-redux'
 import systemSettingsService from '../../api/services/systemSettings'
 
 const CATEGORY_LABELS = {
   attendance: { label: 'Attendance Settings', icon: '📅' },
-  leave:      { label: 'Leave Policies',       icon: '🌴' },
-  payroll:    { label: 'Payroll Settings',     icon: '💰' },
-  general:    { label: 'General Settings',     icon: '⚙️' },
+  leave: { label: 'Leave Policies', icon: '🌴' },
+  payroll: { label: 'Payroll Settings', icon: '💰' },
+  general: { label: 'General Settings', icon: '⚙️' },
 }
 
 export default function SystemSettings() {
   const role = useSelector(s => s.auth.role)
   const canEdit = ['superadmin', 'admin', 'hr'].includes(role)
 
-  const [settings, setSettings]   = useState({})   // { category: [settings] }
-  const [edits, setEdits]         = useState({})    // { key: newValue }
-  const [loading, setLoading]     = useState(true)
-  const [saving, setSaving]       = useState(false)
-  const [saved, setSaved]         = useState(false)
-  const [error, setError]         = useState('')
+  const [settings, setSettings] = useState({})
+  const [edits, setEdits] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     const load = async () => {
       try {
         const res = await systemSettingsService.getAll()
         setSettings(res.data)
-      } catch { setError('Failed to load settings') }
-      finally { setLoading(false) }
+      } catch {
+        setError('Failed to load settings')
+      } finally {
+        setLoading(false)
+      }
     }
     load()
   }, [])
@@ -43,7 +45,6 @@ export default function SystemSettings() {
     setError('')
     try {
       await systemSettingsService.bulkUpdate(edits)
-      // Refresh from server
       const res = await systemSettingsService.getAll()
       setSettings(res.data)
       setEdits({})
@@ -56,20 +57,136 @@ export default function SystemSettings() {
     }
   }
 
-  const getValue = (setting) =>
+  const getValue = setting =>
     edits[setting.key] !== undefined ? edits[setting.key] : setting.value
 
   const hasChanges = Object.keys(edits).length > 0
 
-  if (loading) return (
-    <div style={{ padding: '40px', textAlign: 'center', color: '#aaa', fontSize: '14px' }}>
-      Loading settings...
-    </div>
-  )
+  const renderSetting = setting => {
+    const value = getValue(setting)
+    const isChanged = edits[setting.key] !== undefined
+
+    return (
+      <div
+        key={setting.key}
+        style={{
+          padding: '16px',
+          borderRadius: '10px',
+          marginBottom: '10px',
+          background: isChanged ? '#fffbeb' : '#fff',
+          border: `1px solid ${isChanged ? '#fde68a' : '#e5e7eb'}`,
+          transition: 'all 0.2s',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <label style={{ fontSize: '14px', fontWeight: 600, color: '#111' }}>{setting.label}</label>
+              {isChanged && (
+                <span
+                  style={{
+                    fontSize: '10px',
+                    background: '#fde68a',
+                    color: '#92400e',
+                    padding: '2px 8px',
+                    borderRadius: '20px',
+                    fontWeight: 700,
+                  }}
+                >
+                  MODIFIED
+                </span>
+              )}
+            </div>
+
+            {setting.description && (
+              <p style={{ margin: '0 0 6px', fontSize: '12px', color: '#888', lineHeight: 1.5 }}>
+                {setting.description}
+              </p>
+            )}
+
+            <div style={{ fontSize: '11px', color: '#bbb' }}>
+              Key: <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: '4px' }}>{setting.key}</code>{' '}
+              · Type: {setting.value_type}
+            </div>
+          </div>
+
+          <div style={{ minWidth: '180px' }}>
+            {setting.value_type === 'boolean' ? (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {['true', 'false'].map(opt => (
+                  <button
+                    key={opt}
+                    onClick={() => canEdit && handleChange(setting.key, opt)}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      borderRadius: '8px',
+                      border: '1px solid',
+                      cursor: canEdit ? 'pointer' : 'not-allowed',
+                      fontWeight: 600,
+                      fontSize: '13px',
+                      background: value === opt ? (opt === 'true' ? '#d1fae5' : '#fee2e2') : '#f9fafb',
+                      borderColor: value === opt ? (opt === 'true' ? '#6ee7b7' : '#fca5a5') : '#e5e7eb',
+                      color: value === opt ? (opt === 'true' ? '#065f46' : '#991b1b') : '#888',
+                    }}
+                    disabled={!canEdit}
+                    type="button"
+                  >
+                    {opt === 'true' ? '✓ Yes' : '✗ No'}
+                  </button>
+                ))}
+              </div>
+            ) : setting.value_type === 'json' ? (
+              <textarea
+                value={value}
+                rows={2}
+                onChange={e => canEdit && handleChange(setting.key, e.target.value)}
+                disabled={!canEdit}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd',
+                  fontSize: '12px',
+                  fontFamily: 'monospace',
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                  background: canEdit ? '#fff' : '#f9fafb',
+                }}
+              />
+            ) : (
+              <input
+                value={value}
+                type={setting.value_type === 'integer' || setting.value_type === 'decimal' ? 'number' : 'text'}
+                onChange={e => canEdit && handleChange(setting.key, e.target.value)}
+                disabled={!canEdit}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #ddd',
+                  fontSize: '13px',
+                  boxSizing: 'border-box',
+                  background: canEdit ? '#fff' : '#f9fafb',
+                }}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: '#aaa', fontSize: '14px' }}>
+        Loading settings...
+      </div>
+    )
+  }
 
   return (
     <div style={{ maxWidth: '760px', margin: '0 auto', padding: '24px 16px' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111' }}>
@@ -79,16 +196,20 @@ export default function SystemSettings() {
             {canEdit ? 'Configure company-wide policies and defaults' : 'View system configuration (read-only)'}
           </p>
         </div>
+
         {canEdit && (
           <button
             onClick={handleSave}
             disabled={!hasChanges || saving}
             style={{
-              padding: '9px 20px', borderRadius: '8px', border: 'none',
+              padding: '9px 20px',
+              borderRadius: '8px',
+              border: 'none',
               background: hasChanges ? '#1a1a2e' : '#e5e7eb',
               color: hasChanges ? '#fff' : '#9ca3af',
               cursor: hasChanges ? 'pointer' : 'not-allowed',
-              fontWeight: 600, fontSize: '14px',
+              fontWeight: 600,
+              fontSize: '14px',
             }}
           >
             {saving ? 'Saving...' : saved ? '✓ Saved!' : 'Save Changes'}
@@ -97,116 +218,87 @@ export default function SystemSettings() {
       </div>
 
       {error && (
-        <div style={{
-          background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '8px',
-          padding: '12px 16px', marginBottom: '16px', color: '#dc2626', fontSize: '13px',
-        }}>
+        <div
+          style={{
+            background: '#fee2e2',
+            border: '1px solid #fca5a5',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            color: '#dc2626',
+            fontSize: '13px',
+          }}
+        >
           {error}
         </div>
       )}
 
       {saved && (
-        <div style={{
-          background: '#dcfce7', border: '1px solid #86efac', borderRadius: '8px',
-          padding: '12px 16px', marginBottom: '16px', color: '#16a34a', fontSize: '13px',
-        }}>
+        <div
+          style={{
+            background: '#dcfce7',
+            border: '1px solid #86efac',
+            borderRadius: '8px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            color: '#16a34a',
+            fontSize: '13px',
+          }}
+        >
           ✓ Settings saved successfully!
         </div>
       )}
 
-      {/* Settings by Category */}
       {Object.entries(CATEGORY_LABELS).map(([cat, meta]) => {
         const catSettings = settings[cat] || []
         if (!catSettings.length) return null
+
         return (
-          <div key={cat} style={{
-            background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb',
-            marginBottom: '16px', overflow: 'hidden',
-          }}>
-            {/* Category Header */}
-            <div style={{
-              padding: '14px 20px', background: '#f9fafb',
-              borderBottom: '1px solid #e5e7eb',
-              display: 'flex', alignItems: 'center', gap: '8px',
-            }}>
+          <div
+            key={cat}
+            style={{
+              background: '#fff',
+              borderRadius: '12px',
+              border: '1px solid #e5e7eb',
+              marginBottom: '16px',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                padding: '14px 20px',
+                background: '#f9fafb',
+                borderBottom: '1px solid #e5e7eb',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
               <span style={{ fontSize: '18px' }}>{meta.icon}</span>
               <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#111' }}>
                 {meta.label}
               </h3>
             </div>
 
-            {/* Settings Rows */}
-            <div>
-              {catSettings.map((setting, idx) => (
-                <div key={setting.key} style={{
-                  padding: '14px 20px',
-                  borderBottom: idx < catSettings.length - 1 ? '1px solid #f3f4f6' : 'none',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '16px',
-                }}>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#111' }}>
-                      {setting.label}
-                    </p>
-                    {setting.description && (
-                      <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#9ca3af' }}>
-                        {setting.description}
-                      </p>
-                    )}
-                  </div>
-                  <div style={{ flexShrink: 0 }}>
-                    {/* Boolean toggle */}
-                    {(setting.value === 'true' || setting.value === 'false') && canEdit ? (
-                      <button
-                        onClick={() => handleChange(setting.key, getValue(setting) === 'true' ? 'false' : 'true')}
-                        style={{
-                          width: '52px', height: '28px', borderRadius: '14px', border: 'none',
-                          cursor: 'pointer', transition: 'background 0.2s', position: 'relative',
-                          background: getValue(setting) === 'true' ? '#22c55e' : '#d1d5db',
-                        }}
-                      >
-                        <span style={{
-                          position: 'absolute', top: '3px',
-                          left: getValue(setting) === 'true' ? '26px' : '3px',
-                          width: '22px', height: '22px', borderRadius: '50%',
-                          background: '#fff', transition: 'left 0.2s', display: 'block',
-                        }} />
-                      </button>
-                    ) : canEdit ? (
-                      /* Number or text input */
-                      <input
-                        type={isNaN(Number(setting.value)) ? 'text' : 'number'}
-                        value={getValue(setting)}
-                        onChange={e => handleChange(setting.key, e.target.value)}
-                        style={{
-                          width: '120px', padding: '6px 10px', borderRadius: '7px',
-                          border: `1px solid ${edits[setting.key] !== undefined ? '#818cf8' : '#e5e7eb'}`,
-                          fontSize: '14px', textAlign: 'right', outline: 'none',
-                          background: edits[setting.key] !== undefined ? '#f0f4ff' : '#fff',
-                        }}
-                      />
-                    ) : (
-                      /* Read-only */
-                      <span style={{
-                        padding: '4px 12px', borderRadius: '6px', background: '#f3f4f6',
-                        fontSize: '14px', color: '#374151', fontWeight: 600,
-                      }}>
-                        {setting.value === 'true' ? '✓ Yes' : setting.value === 'false' ? '✗ No' : setting.value}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div style={{ padding: '14px 14px 4px' }}>
+              {catSettings.map(setting => renderSetting(setting))}
             </div>
           </div>
         )
       })}
 
       {!canEdit && (
-        <p style={{
-          textAlign: 'center', color: '#9ca3af', fontSize: '13px',
-          padding: '16px', background: '#f9fafb', borderRadius: '8px',
-          border: '1px solid #e5e7eb',
-        }}>
+        <p
+          style={{
+            textAlign: 'center',
+            color: '#9ca3af',
+            fontSize: '13px',
+            padding: '16px',
+            background: '#f9fafb',
+            borderRadius: '8px',
+            border: '1px solid #e5e7eb',
+          }}
+        >
           🔒 Only Admin and HR can modify system settings.
         </p>
       )}

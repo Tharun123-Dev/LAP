@@ -306,6 +306,8 @@ class AllAttendanceView(APIView):
 
 # ── REGULARIZATION — APPLY ────────────────────────────────────────────────────
 
+# ── REGULARIZATION — APPLY ────────────────────────────────────────────────────
+
 class ApplyRegularizationView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
@@ -335,7 +337,10 @@ class ApplyRegularizationView(APIView):
             try:
                 target_date = date.fromisoformat(target_date_str)
             except ValueError:
-                return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
+                return Response(
+                    {'error': 'Invalid date format. Use YYYY-MM-DD'},
+                    status=400
+                )
 
             record, created = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
@@ -355,31 +360,40 @@ class ApplyRegularizationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Block if regularization already submitted for this record
+        # Block if regularization already submitted
         if hasattr(record, 'regularization'):
             existing = record.regularization
+
             if existing.status == 'pending':
                 return Response(
                     {'error': 'A pending regularization already exists for this date.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            # If previously rejected, delete old one and allow re-submission
+
+            # Allow resubmit if rejected
             if existing.status == 'rejected':
                 existing.delete()
 
+        # Create regularization
         reg = AttendanceRegularization.objects.create(
             attendance         = record,
             employee           = request.user,
             reason             = reason,
-            requested_checkin  = req_checkin  or None,
+            requested_checkin  = req_checkin or None,
             requested_checkout = req_checkout or None,
         )
+
+        # ── NOTIFICATION ─────────────────────────────────────────────
+        try:
+            from notifications.utils import notify_attendance_regularization
+            notify_attendance_regularization(reg)
+        except Exception as e:
+            print("Regularization notification error:", e)
 
         return Response(
             RegularizationSerializer(reg).data,
             status=status.HTTP_201_CREATED
         )
-
 
 # ── REGULARIZATION — MY LIST ──────────────────────────────────────────────────
 
@@ -408,20 +422,26 @@ class AllRegularizationsView(APIView):
 
 # ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
 
+# ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
+
 class ApproveRegularizationView(APIView):
     permission_classes = [make_permission('approve_regularize')]
 
     def post(self, request, pk):
-        action = request.data.get('action')   # 'approve' or 'reject'
+        action = request.data.get('action')   # approve / reject
         note   = request.data.get('note', '')
 
         if action not in ['approve', 'reject']:
-            return Response({'error': 'action must be approve or reject'}, status=400)
+            return Response(
+                {'error': 'action must be approve or reject'},
+                status=400
+            )
 
         try:
             reg = AttendanceRegularization.objects.select_related(
                 'attendance'
             ).get(pk=pk)
+
         except AttendanceRegularization.DoesNotExist:
             return Response({'error': 'Not found'}, status=404)
 
@@ -431,32 +451,55 @@ class ApproveRegularizationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Update status
         reg.status        = 'approved' if action == 'approve' else 'rejected'
         reg.approved_by   = request.user
         reg.approver_note = note
         reg.save()
 
-        # If approved, update the attendance record
+        # ── NOTIFICATION ─────────────────────────────────────────────
+        try:
+            from notifications.utils import notify_regularization_actioned
+            notify_regularization_actioned(reg, action, request.user)
+        except Exception as e:
+            print("Regularization action notification error:", e)
+
+        # ── UPDATE ATTENDANCE IF APPROVED ───────────────────────────
         if action == 'approve':
             record = reg.attendance
+
             if reg.requested_checkin:
                 record.check_in = reg.requested_checkin
+
             if reg.requested_checkout:
                 record.check_out = reg.requested_checkout
+
             if record.check_in and record.check_out:
-                ci   = datetime.combine(date.today(), record.check_in)
-                co   = datetime.combine(date.today(), record.check_out)
-                diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
+                ci = datetime.combine(date.today(), record.check_in)
+                co = datetime.combine(date.today(), record.check_out)
+
+                diff = Decimal(
+                    str(round((co - ci).total_seconds() / 3600, 2))
+                )
+
                 record.hours_worked = diff
-                record.ot_hours     = max(diff - STANDARD_HOURS, Decimal('0'))
-                record.status       = _get_status(record.check_in, record.check_out, diff)
+                record.ot_hours = max(
+                    diff - STANDARD_HOURS,
+                    Decimal('0')
+                )
+
+                record.status = _get_status(
+                    record.check_in,
+                    record.check_out,
+                    diff
+                )
+
             record.save()
 
         return Response({
             'message': f'Regularization {reg.status}',
-            'data':    RegularizationSerializer(reg).data,
+            'data': RegularizationSerializer(reg).data,
         })
-
 
 # ── HOLIDAYS ──────────────────────────────────────────────────────────────────
 
@@ -468,3 +511,4 @@ class HolidayListView(generics.ListCreateAPIView):
         if self.request.method == 'GET':
             return [IsAuthenticatedUser()]
         return [make_permission('manage_settings')()]
+    

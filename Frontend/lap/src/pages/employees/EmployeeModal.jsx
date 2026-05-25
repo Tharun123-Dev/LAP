@@ -1,29 +1,45 @@
 // src/pages/employees/EmployeeModal.jsx
 import { useState, useEffect } from 'react'
 import { createEmployeeApi, updateEmployeeApi, listManagersApi } from '../../api/services/employees'
+import { getPermissionListApi, getCustomRolesApi, getUserPermissionsApi, saveUserPermissionsApi } from '../../api/services/permissions'
 import toast from 'react-hot-toast'
 
 const DESIGNATIONS = [
-  'software_engineer', 'senior_engineer', 'team_lead',
-  'project_manager', 'hr_executive', 'hr_manager',
-  'accountant', 'analyst', 'intern', 'other',
+  'software_engineer', 'senior_engineer', 'team_lead', 'project_manager',
+  'hr_executive', 'hr_manager', 'accountant', 'analyst', 'intern', 'other',
+]
+
+const BASE_ROLES = [
+  { value: 'employee', label: 'Employee' },
+  { value: 'hr',       label: 'HR' },
+  { value: 'manager',  label: 'Manager' },
 ]
 
 export default function EmployeeModal({ employee, departments, onClose, onSaved }) {
   const isEdit = !!employee
-  const [managers, setManagers] = useState([])
-  const [saving,   setSaving]   = useState(false)
+  const [managers,     setManagers]     = useState([])
+  const [customRoles,  setCustomRoles]  = useState([])
+  const [allPerms,     setAllPerms]     = useState([])
+  const [userPerms,    setUserPerms]    = useState(null)  // for edit mode
+  const [overrides,    setOverrides]    = useState({})   // {code: true/false/null(=use role default)}
+  const [activeTab,    setActiveTab]    = useState('info')
+  const [saving,       setSaving]       = useState(false)
+  const [loadingPerms, setLoadingPerms] = useState(false)
 
   const [form, setForm] = useState({
     username: '', email: '', first_name: '', last_name: '',
     password: '', role: 'employee', employee_type: 'regular',
-    emp_code: '', department: '', designation: 'software_engineer',
+    custom_role: '', emp_code: '', department: '',
+    designation: 'software_engineer',
     joining_date: new Date().toISOString().split('T')[0],
     phone: '', address: '', manager: '', date_of_birth: '',
   })
 
   useEffect(() => {
     listManagersApi().then(r => setManagers(r.data)).catch(() => {})
+    getCustomRolesApi().then(r => setCustomRoles(r.data)).catch(() => {})
+    getPermissionListApi().then(r => setAllPerms(r.data)).catch(() => {})
+
     if (isEdit) {
       setForm({
         username:      employee.username      || '',
@@ -33,44 +49,108 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
         password:      '',
         role:          employee.role          || 'employee',
         employee_type: employee.employee_type || 'regular',
+        custom_role:   employee.custom_role   || '',
         emp_code:      employee.emp_code      || '',
         department:    employee.department    || '',
-        designation:   employee.designation  || 'other',
+        designation:   employee.designation   || 'other',
         joining_date:  employee.joining_date  || '',
         phone:         employee.phone         || '',
         address:       employee.address       || '',
         manager:       employee.manager       || '',
         date_of_birth: employee.date_of_birth || '',
       })
+      // Load per-user permissions if editing
+      if (employee.user_id) {
+        setLoadingPerms(true)
+        getUserPermissionsApi(employee.user_id)
+          .then(r => {
+            setUserPerms(r.data)
+            // Build overrides map from existing data
+            const ov = {}
+            r.data.permissions.forEach(p => {
+              if (p.has_override) ov[p.code] = p.override_val
+            })
+            setOverrides(ov)
+          })
+          .catch(() => {})
+          .finally(() => setLoadingPerms(false))
+      }
     }
   }, [])
 
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }))
 
+  // When role changes, reload effective permissions preview
+  const handleRoleChange = async (newRole) => {
+    setForm(p => ({ ...p, role: newRole }))
+  }
+
+  // Permission override toggle: null=role-default, true=force-grant, false=force-revoke
+  const toggleOverride = (code, currentEffective) => {
+    setOverrides(prev => {
+      const current = prev[code]
+      if (current === undefined) {
+        // No override: toggle to opposite of current effective
+        return { ...prev, [code]: !currentEffective }
+      } else if (current !== currentEffective) {
+        // Override exists and flips it: remove override (revert to role default)
+        const next = { ...prev }
+        delete next[code]
+        return next
+      } else {
+        return { ...prev, [code]: !current }
+      }
+    })
+  }
+
+  // Group permissions by module
+  const groupedPerms = allPerms.reduce((acc, p) => {
+    if (!acc[p.module]) acc[p.module] = []
+    acc[p.module].push(p)
+    return acc
+  }, {})
+
   const handleSubmit = async () => {
     if (!form.first_name || !form.last_name || !form.email) {
-      toast.error('First name, last name, and email are required')
-      return
+      toast.error('First name, last name, and email are required'); return
     }
     if (!isEdit && !form.password) {
-      toast.error('Password is required for new employee')
-      return
+      toast.error('Password is required'); return
     }
     if (!form.emp_code || !form.joining_date) {
-      toast.error('Employee code and joining date are required')
-      return
+      toast.error('Employee code and joining date are required'); return
     }
 
     setSaving(true)
     try {
-      const payload = { ...form }
-      if (!payload.department) delete payload.department
-      if (!payload.manager)    delete payload.manager
+      const overridesList = Object.entries(overrides).map(([code, is_granted]) => ({
+        code, is_granted
+      }))
+
+      const payload = {
+        ...form,
+        custom_role: form.custom_role || null,
+        permission_overrides: overridesList,
+      }
+      if (!payload.department)    delete payload.department
+      if (!payload.manager)       delete payload.manager
       if (!payload.date_of_birth) delete payload.date_of_birth
       if (isEdit && !payload.password) delete payload.password
 
       if (isEdit) {
         await updateEmployeeApi(employee.id, payload)
+        // Save permission overrides separately for edit
+        if (employee.user_id) {
+          const clearCodes  = []
+          const setOverrides_ = []
+          Object.entries(overrides).forEach(([code, val]) => {
+            setOverrides_.push({ code, is_granted: val })
+          })
+          await saveUserPermissionsApi(employee.user_id, {
+            overrides: setOverrides_,
+            clear: clearCodes
+          })
+        }
         toast.success('Employee updated!')
       } else {
         await createEmployeeApi(payload)
@@ -88,130 +168,311 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
     } finally { setSaving(false) }
   }
 
+  const tabs = [
+    { id: 'info',        label: 'Personal Info' },
+    { id: 'job',         label: 'Job & Role' },
+    { id: 'permissions', label: '🔐 Permissions' },
+  ]
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
-      <div style={{ background: '#fff', borderRadius: '14px', width: '100%', maxWidth: '680px', maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+      <div style={{ background: '#fff', borderRadius: '16px', width: '100%', maxWidth: '780px', maxHeight: '92vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
 
         {/* Header */}
-        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#111' }}>
-            {isEdit ? 'Edit Employee' : 'Add New Employee'}
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1a1a2e' }}>
+          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: '#fff' }}>
+            {isEdit ? `Edit: ${employee.first_name} ${employee.last_name}` : 'Add New Employee'}
           </h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' }}>✕</button>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', width: 32, height: 32, borderRadius: '50%', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
+          {tabs.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+              padding: '12px 20px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+              background: activeTab === tab.id ? '#fff' : 'transparent',
+              color: activeTab === tab.id ? '#1a1a2e' : '#888',
+              borderBottom: activeTab === tab.id ? '2px solid #1a1a2e' : '2px solid transparent',
+              transition: 'all 0.15s',
+            }}>
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Body */}
         <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
-          <Section title="Personal Info">
-            <Row>
-              <Field label="First Name *">
-                <input value={form.first_name} onChange={set('first_name')} style={inp} placeholder="John" />
-              </Field>
-              <Field label="Last Name *">
-                <input value={form.last_name} onChange={set('last_name')} style={inp} placeholder="Doe" />
-              </Field>
-            </Row>
-            <Row>
-              <Field label="Email *">
-                <input value={form.email} onChange={set('email')} style={inp} placeholder="john@company.com" type="email" />
-              </Field>
-              <Field label="Phone">
-                <input value={form.phone} onChange={set('phone')} style={inp} placeholder="9876543210" />
-              </Field>
-            </Row>
-            <Row>
-              <Field label="Date of Birth">
-                <input value={form.date_of_birth} onChange={set('date_of_birth')} style={inp} type="date" />
-              </Field>
-              <Field label="Address">
-                <input value={form.address} onChange={set('address')} style={inp} placeholder="City, State" />
-              </Field>
-            </Row>
-          </Section>
 
-          <Section title="Account">
-            <Row>
-              <Field label="Username *">
-                <input value={form.username} onChange={set('username')} style={inp} placeholder="john.doe" disabled={isEdit} />
-              </Field>
-              <Field label={isEdit ? "New Password (leave blank to keep)" : "Password *"}>
-                <input value={form.password} onChange={set('password')} style={inp} type="password" placeholder="Min 8 characters" />
-              </Field>
-            </Row>
-            <Row>
-              <Field label="Role">
-                <select value={form.role} onChange={set('role')} style={inp}>
-                  <option value="employee">Employee</option>
-                  <option value="hr">HR</option>
-                  <option value="manager">Manager</option>
-                </select>
-              </Field>
-              <Field label="Employee Type">
-                <select value={form.employee_type} onChange={set('employee_type')} style={inp}>
-                  <option value="regular">Regular</option>
-                  <option value="contract">Contract</option>
-                  <option value="parttime">Part-Time</option>
-                  <option value="intern">Intern</option>
-                </select>
-              </Field>
-            </Row>
-          </Section>
+          {/* ── TAB: Personal Info ── */}
+          {activeTab === 'info' && (
+            <>
+              <Section title="Personal Info">
+                <Row>
+                  <Field label="First Name *">
+                    <input value={form.first_name} onChange={set('first_name')} style={inp} placeholder="John" />
+                  </Field>
+                  <Field label="Last Name *">
+                    <input value={form.last_name} onChange={set('last_name')} style={inp} placeholder="Doe" />
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Email *">
+                    <input value={form.email} onChange={set('email')} style={inp} placeholder="john@company.com" type="email" />
+                  </Field>
+                  <Field label="Phone">
+                    <input value={form.phone} onChange={set('phone')} style={inp} placeholder="9876543210" />
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Date of Birth">
+                    <input value={form.date_of_birth} onChange={set('date_of_birth')} style={inp} type="date" />
+                  </Field>
+                  <Field label="Address">
+                    <input value={form.address} onChange={set('address')} style={inp} placeholder="City, State" />
+                  </Field>
+                </Row>
+              </Section>
 
-          <Section title="Job Details">
-            <Row>
-              <Field label="Employee Code *">
-                <input value={form.emp_code} onChange={set('emp_code')} style={inp} placeholder="EMP001" disabled={isEdit} />
-              </Field>
-              <Field label="Joining Date *">
-                <input value={form.joining_date} onChange={set('joining_date')} style={inp} type="date" />
-              </Field>
-            </Row>
-            <Row>
-              <Field label="Department">
-                <select value={form.department} onChange={set('department')} style={inp}>
-                  <option value="">Select Department</option>
-                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Designation">
-                <select value={form.designation} onChange={set('designation')} style={inp}>
-                  {DESIGNATIONS.map(d => <option key={d} value={d}>{d.replace(/_/g, ' ')}</option>)}
-                </select>
-              </Field>
-            </Row>
-            <Row>
-              <Field label="Reporting Manager">
-                <select value={form.manager} onChange={set('manager')} style={inp}>
-                  <option value="">No Manager</option>
-                  {managers.map(m => (
-                    <option key={m.id} value={m.id}>
-                      {m.first_name} {m.last_name} ({m.role})
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            </Row>
-          </Section>
+              <Section title="Account Credentials">
+                <Row>
+                  <Field label="Username *">
+                    <input value={form.username} onChange={set('username')} style={inp} placeholder="john.doe" disabled={isEdit} />
+                  </Field>
+                  <Field label={isEdit ? 'New Password (blank = keep)' : 'Password *'}>
+                    <input value={form.password} onChange={set('password')} style={inp} type="password" placeholder="Min 8 chars" />
+                  </Field>
+                </Row>
+              </Section>
+            </>
+          )}
+
+          {/* ── TAB: Job & Role ── */}
+          {activeTab === 'job' && (
+            <>
+              <Section title="Role & Type">
+                <Row>
+                  <Field label="Base Role">
+                    <select value={form.role} onChange={e => handleRoleChange(e.target.value)} style={inp}>
+                      {BASE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Employee Type">
+                    <select value={form.employee_type} onChange={set('employee_type')} style={inp}>
+                      <option value="regular">Regular</option>
+                      <option value="contract">Contract</option>
+                      <option value="parttime">Part-Time</option>
+                      <option value="intern">Intern</option>
+                    </select>
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Job Title / Custom Role">
+                    <select value={form.custom_role} onChange={set('custom_role')} style={inp}>
+                      <option value="">— Use Base Role Label —</option>
+                      {customRoles.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.display_name} ({r.base_role})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Designation">
+                    <select value={form.designation} onChange={set('designation')} style={inp}>
+                      {DESIGNATIONS.map(d => (
+                        <option key={d} value={d}>{d.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </Row>
+                {/* Role info box */}
+                <div style={{ background: '#f0f4ff', border: '1px solid #c7d7fe', borderRadius: '8px', padding: '12px', marginTop: '8px', fontSize: '12px', color: '#3730a3' }}>
+                  <strong>How roles work:</strong> Base Role controls permissions (Manager can approve leaves, etc.).
+                  Job Title / Custom Role is just the display label shown in notifications and reports.
+                  You can fine-tune individual permissions in the <strong>Permissions</strong> tab.
+                </div>
+              </Section>
+
+              <Section title="Job Details">
+                <Row>
+                  <Field label="Employee Code *">
+                    <input value={form.emp_code} onChange={set('emp_code')} style={inp} placeholder="EMP001" disabled={isEdit} />
+                  </Field>
+                  <Field label="Joining Date *">
+                    <input value={form.joining_date} onChange={set('joining_date')} style={inp} type="date" />
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Department">
+                    <select value={form.department} onChange={set('department')} style={inp}>
+                      <option value="">Select Department</option>
+                      {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="Reporting Manager">
+                    <select value={form.manager} onChange={set('manager')} style={inp}>
+                      <option value="">No Manager</option>
+                      {managers.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.first_name} {m.last_name} ({m.role})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </Row>
+              </Section>
+            </>
+          )}
+
+          {/* ── TAB: Permissions ── */}
+          {activeTab === 'permissions' && (
+            <div>
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#92400e' }}>
+                <strong>📌 How this works:</strong> The <em>Role Default</em> column shows what the selected base role ({form.role}) normally gets.
+                Use the toggles to <strong>grant extra permissions</strong> (🟢) or <strong>revoke permissions</strong> (🔴) for this specific employee only.
+                Leave as <em>Role Default</em> to not set any override.
+              </div>
+
+              {loadingPerms ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>Loading permissions...</div>
+              ) : (
+                Object.entries(groupedPerms).map(([module, perms]) => {
+                  // Calculate effective for each permission
+                  return (
+                    <div key={module} style={{ marginBottom: '20px' }}>
+                      <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                        {module}
+                      </p>
+                      <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
+                        {perms.map((perm, i) => {
+                          // Compute role default from userPerms (if editing) or show ?
+                          const roleDefault = userPerms
+                            ? (userPerms.permissions.find(p => p.code === perm.code)?.role_default ?? false)
+                            : null
+                          const hasOverride = overrides[perm.code] !== undefined
+                          const effective   = hasOverride ? overrides[perm.code] : (roleDefault ?? false)
+
+                          return (
+                            <div key={perm.code} style={{
+                              display: 'grid', gridTemplateColumns: '1fr 90px 110px 100px',
+                              alignItems: 'center', padding: '10px 14px', gap: '8px',
+                              background: i % 2 === 0 ? '#fff' : '#fafafa',
+                              borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
+                            }}>
+                              {/* Name */}
+                              <div>
+                                <div style={{ fontSize: '13px', fontWeight: 500, color: '#111' }}>{perm.label}</div>
+                                <div style={{ fontSize: '11px', color: '#aaa' }}>{perm.code}</div>
+                              </div>
+
+                              {/* Role Default */}
+                              <div style={{ fontSize: '12px', textAlign: 'center' }}>
+                                {roleDefault === null ? (
+                                  <span style={{ color: '#ccc' }}>—</span>
+                                ) : roleDefault ? (
+                                  <span style={{ color: '#10b981', fontWeight: 600 }}>✓ Yes</span>
+                                ) : (
+                                  <span style={{ color: '#e5e7eb', fontWeight: 600 }}>✗ No</span>
+                                )}
+                              </div>
+
+                              {/* Override control */}
+                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
+                                <button
+                                  onClick={() => setOverrides(p => {
+                                    const n = { ...p }; n[perm.code] = true; return n
+                                  })}
+                                  style={{
+                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
+                                    cursor: 'pointer', fontWeight: 600,
+                                    background: overrides[perm.code] === true ? '#d1fae5' : '#f9fafb',
+                                    borderColor: overrides[perm.code] === true ? '#6ee7b7' : '#e5e7eb',
+                                    color: overrides[perm.code] === true ? '#065f46' : '#888',
+                                  }}
+                                >
+                                  Grant
+                                </button>
+                                <button
+                                  onClick={() => setOverrides(p => {
+                                    const n = { ...p }; n[perm.code] = false; return n
+                                  })}
+                                  style={{
+                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
+                                    cursor: 'pointer', fontWeight: 600,
+                                    background: overrides[perm.code] === false ? '#fee2e2' : '#f9fafb',
+                                    borderColor: overrides[perm.code] === false ? '#fca5a5' : '#e5e7eb',
+                                    color: overrides[perm.code] === false ? '#991b1b' : '#888',
+                                  }}
+                                >
+                                  Revoke
+                                </button>
+                                {hasOverride && (
+                                  <button
+                                    onClick={() => setOverrides(p => { const n = { ...p }; delete n[perm.code]; return n })}
+                                    style={{
+                                      padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid #e5e7eb',
+                                      cursor: 'pointer', background: '#f9fafb', color: '#888', fontWeight: 500,
+                                    }}
+                                    title="Remove override — revert to role default"
+                                  >
+                                    Reset
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Effective badge */}
+                              <div style={{ textAlign: 'center' }}>
+                                <span style={{
+                                  fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+                                  background: effective ? '#d1fae5' : '#f3f4f6',
+                                  color: effective ? '#065f46' : '#6b7280',
+                                  border: `1px solid ${effective ? '#6ee7b7' : '#e5e7eb'}`,
+                                }}>
+                                  {hasOverride ? '★ ' : ''}{effective ? 'ALLOWED' : 'DENIED'}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
-        <div style={{ padding: '16px 24px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
-          <button onClick={onClose} style={{ padding: '10px 20px', background: '#f3f4f6', color: '#333', border: 'none', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}>
-            Cancel
-          </button>
-          <button onClick={handleSubmit} disabled={saving} style={{ padding: '10px 24px', background: saving ? '#999' : '#1a1a2e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}>
-            {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Employee'}
-          </button>
+        <div style={{ padding: '16px 24px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9fafb' }}>
+          <div style={{ fontSize: '12px', color: '#888' }}>
+            {Object.keys(overrides).length > 0 && (
+              <span style={{ color: '#f59e0b', fontWeight: 600 }}>
+                ⚠ {Object.keys(overrides).length} permission override{Object.keys(overrides).length > 1 ? 's' : ''} set
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button onClick={onClose} style={{ padding: '10px 20px', background: '#f3f4f6', color: '#333', border: 'none', borderRadius: '8px', fontSize: '13px', cursor: 'pointer' }}>
+              Cancel
+            </button>
+            <button onClick={handleSubmit} disabled={saving} style={{
+              padding: '10px 24px', background: saving ? '#999' : '#1a1a2e', color: '#fff',
+              border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600,
+              cursor: saving ? 'not-allowed' : 'pointer'
+            }}>
+              {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Employee'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   )
 }
 
-// Small helpers to keep form clean
 const Section = ({ title, children }) => (
   <div style={{ marginBottom: '24px' }}>
-    <p style={{ margin: '0 0 12px', fontSize: '12px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{title}</p>
+    <p style={{ margin: '0 0 12px', fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{title}</p>
     {children}
   </div>
 )
@@ -226,4 +487,4 @@ const Field = ({ label, children }) => (
     {children}
   </div>
 )
-const inp = { width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif' }
+const inp = { width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', outline: 'none', boxSizing: 'border-box' }

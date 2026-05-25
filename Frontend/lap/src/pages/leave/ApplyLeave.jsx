@@ -1,15 +1,20 @@
-// src/pages/leave/ApplyLeave.jsx
 import { useEffect, useState } from 'react'
 import { getLeaveTypesApi, applyLeaveApi, getMyBalanceApi } from '../../api/services/leave'
+import { checkLeaveQuotaApi } from '../../api/services/permissions'
 import toast from 'react-hot-toast'
 
 export default function ApplyLeave({ onApplied }) {
-  const [types,   setTypes]   = useState([])
+  const [types, setTypes] = useState([])
   const [balance, setBalance] = useState([])
-  const [saving,  setSaving]  = useState(false)
-  const [form,    setForm]    = useState({
-    leave_type: '', start_date: '', end_date: '',
-    session: 'full', reason: '', doc_url: '',
+  const [quota, setQuota] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({
+    leave_type: '',
+    start_date: '',
+    end_date: '',
+    session: 'full',
+    reason: '',
+    doc_url: '',
   })
   const [days, setDays] = useState(0)
 
@@ -18,13 +23,41 @@ export default function ApplyLeave({ onApplied }) {
     getMyBalanceApi(new Date().getFullYear()).then(r => setBalance(r.data)).catch(() => {})
   }, [])
 
+  useEffect(() => {
+    if (!form.leave_type || !form.start_date || !form.end_date) {
+      setQuota(null)
+      return
+    }
+
+    checkLeaveQuotaApi({
+      leave_type: form.leave_type,
+      start: form.start_date,
+      end: form.end_date,
+    })
+      .then(r => setQuota(r.data))
+      .catch(() => setQuota(null))
+  }, [form.leave_type, form.start_date, form.end_date])
+
   // Auto-calculate days when dates/session change
   useEffect(() => {
-    if (!form.start_date || !form.end_date) { setDays(0); return }
+    if (!form.start_date || !form.end_date) {
+      setDays(0)
+      return
+    }
+
     const start = new Date(form.start_date)
-    const end   = new Date(form.end_date)
-    if (end < start) { setDays(0); return }
-    if (form.session !== 'full') { setDays(0.5); return }
+    const end = new Date(form.end_date)
+
+    if (end < start) {
+      setDays(0)
+      return
+    }
+
+    if (form.session !== 'full') {
+      setDays(0.5)
+      return
+    }
+
     let count = 0
     const cur = new Date(start)
     while (cur <= end) {
@@ -38,75 +71,121 @@ export default function ApplyLeave({ onApplied }) {
 
   // Get remaining balance for selected leave type
   const selectedBalance = balance.find(b => b.leave_type === parseInt(form.leave_type))
-  const remaining       = selectedBalance ? parseFloat(selectedBalance.remaining) : null
-  const insufficient    = remaining !== null && days > remaining
+  const remaining = selectedBalance ? parseFloat(selectedBalance.remaining) : null
+  const insufficient = remaining !== null && days > remaining
+  const selectedType = types.find(t => t.id === parseInt(form.leave_type))
 
   const handleSubmit = async () => {
     if (!form.leave_type || !form.start_date || !form.end_date || !form.reason.trim()) {
       toast.error('Please fill all required fields')
       return
     }
+
     if (new Date(form.end_date) < new Date(form.start_date)) {
       toast.error('End date cannot be before start date')
       return
     }
+
     if (insufficient) {
       toast.error('Insufficient leave balance')
       return
     }
+
+    if (quota && !quota.can_apply) {
+      toast.error('Leave quota issue')
+      return
+    }
+
     setSaving(true)
     try {
-      console.log(form)
       await applyLeaveApi(form)
       toast.success('Leave request submitted!')
       onApplied()
     } catch (e) {
       toast.error(e.response?.data?.error || 'Failed to apply')
-    } finally { setSaving(false) }
+    } finally {
+      setSaving(false)
+    }
   }
-
-  const selectedType = types.find(t => t.id === parseInt(form.leave_type))
 
   return (
     <div style={{ maxWidth: '600px' }}>
-      <h3 style={{ margin: '0 0 20px', fontSize: '17px', fontWeight: 700, color: '#111' }}>Apply for Leave</h3>
+      <h3 style={{ margin: '0 0 20px', fontSize: '17px', fontWeight: 700, color: '#111' }}>
+        Apply for Leave
+      </h3>
 
       <div style={{ background: '#fff', borderRadius: '14px', border: '1px solid #e5e7eb', padding: '24px' }}>
-
         {/* Leave Type */}
         <div style={fieldWrap}>
           <label style={lbl}>Leave Type *</label>
           <select value={form.leave_type} onChange={set('leave_type')} style={inp}>
             <option value="">Select leave type</option>
             {types.map(t => (
-              <option key={t.id} value={t.id}>{t.name} ({t.code})</option>
+              <option key={t.id} value={t.id}>
+                {t.name} ({t.code})
+              </option>
             ))}
           </select>
         </div>
 
         {/* Balance info for selected type */}
         {selectedBalance && (
-          <div style={{ background: insufficient ? '#fef2f2' : '#f0fdf4', border: `1px solid ${insufficient ? '#fecaca' : '#bbf7d0'}`, borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '13px' }}>
+          <div
+            style={{
+              background: insufficient ? '#fef2f2' : '#f0fdf4',
+              border: `1px solid ${insufficient ? '#fecaca' : '#bbf7d0'}`,
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '16px',
+              fontSize: '13px',
+            }}
+          >
             <span style={{ color: insufficient ? '#dc2626' : '#16a34a', fontWeight: 600 }}>
               {insufficient ? '⚠ Insufficient balance' : '✓ Balance available'}
             </span>
             <span style={{ color: '#555', marginLeft: '8px' }}>
               Available: <strong>{selectedBalance.remaining}</strong> days
-              {days > 0 && <> · Requesting: <strong style={{ color: insufficient ? '#dc2626' : '#1d4ed8' }}>{days}</strong> days</>}
+              {days > 0 && (
+                <>
+                  {' '}
+                  · Requesting: <strong style={{ color: insufficient ? '#dc2626' : '#1d4ed8' }}>{days}</strong>{' '}
+                  days
+                </>
+              )}
             </span>
           </div>
         )}
 
         {/* Document notice */}
         {selectedType?.requires_document && (
-          <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#92400e' }}>
+          <div
+            style={{
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '16px',
+              fontSize: '12px',
+              color: '#92400e',
+            }}
+          >
             📎 This leave type requires a supporting document (medical certificate, etc.)
           </div>
         )}
 
         {/* Notice period */}
         {selectedType?.min_notice_days > 0 && (
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#1e40af' }}>
+          <div
+            style={{
+              background: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '16px',
+              fontSize: '12px',
+              color: '#1e40af',
+            }}
+          >
             🗓 Requires {selectedType.min_notice_days} day(s) advance notice
           </div>
         )}
@@ -115,11 +194,23 @@ export default function ApplyLeave({ onApplied }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', marginBottom: '16px' }}>
           <div>
             <label style={lbl}>Start Date *</label>
-            <input type="date" value={form.start_date} onChange={set('start_date')} style={inp} min={new Date().toISOString().split('T')[0]} />
+            <input
+              type="date"
+              value={form.start_date}
+              onChange={set('start_date')}
+              style={inp}
+              min={new Date().toISOString().split('T')[0]}
+            />
           </div>
           <div>
             <label style={lbl}>End Date *</label>
-            <input type="date" value={form.end_date} onChange={set('end_date')} style={inp} min={form.start_date || new Date().toISOString().split('T')[0]} />
+            <input
+              type="date"
+              value={form.end_date}
+              onChange={set('end_date')}
+              style={inp}
+              min={form.start_date || new Date().toISOString().split('T')[0]}
+            />
           </div>
         </div>
 
@@ -128,19 +219,24 @@ export default function ApplyLeave({ onApplied }) {
           <label style={lbl}>Session</label>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {[
-              { val: 'full',        label: 'Full Day' },
-              { val: 'first_half',  label: 'First Half' },
+              { val: 'full', label: 'Full Day' },
+              { val: 'first_half', label: 'First Half' },
               { val: 'second_half', label: 'Second Half' },
             ].map(s => (
               <button
                 key={s.val}
+                type="button"
                 onClick={() => setForm(p => ({ ...p, session: s.val }))}
                 style={{
-                  padding: '7px 16px', borderRadius: '8px', border: '1px solid',
+                  padding: '7px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid',
                   borderColor: form.session === s.val ? '#1a1a2e' : '#ddd',
                   background: form.session === s.val ? '#1a1a2e' : '#fff',
                   color: form.session === s.val ? '#fff' : '#555',
-                  fontSize: '13px', cursor: 'pointer', fontWeight: form.session === s.val ? 600 : 400,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontWeight: form.session === s.val ? 600 : 400,
                 }}
               >
                 {s.label}
@@ -171,20 +267,107 @@ export default function ApplyLeave({ onApplied }) {
         {selectedType?.requires_document && (
           <div style={fieldWrap}>
             <label style={lbl}>Document URL</label>
-            <input value={form.doc_url} onChange={set('doc_url')} placeholder="https://drive.google.com/..." style={inp} />
+            <input
+              value={form.doc_url}
+              onChange={set('doc_url')}
+              placeholder="https://drive.google.com/..."
+              style={inp}
+            />
+          </div>
+        )}
+
+        {/* Quota info */}
+        {quota && (
+          <div
+            style={{
+              padding: '14px',
+              borderRadius: '10px',
+              marginBottom: '16px',
+              background: quota.can_apply ? '#f0fdf4' : '#fef2f2',
+              border: `1px solid ${quota.can_apply ? '#86efac' : '#fca5a5'}`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: '13px',
+                fontWeight: 700,
+                marginBottom: '8px',
+                color: quota.can_apply ? '#166534' : '#991b1b',
+              }}
+            >
+              {quota.can_apply ? '✓ Leave Quota Available' : '✗ Leave Quota Issue'}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '8px' }}>
+              {[
+                { label: 'Annual Allowed', value: quota.annual_allowed },
+                { label: 'Used', value: quota.annual_used },
+                { label: 'Pending', value: quota.annual_pending },
+                { label: 'Remaining', value: quota.annual_remaining },
+              ].map(item => (
+                <div
+                  key={item.label}
+                  style={{
+                    textAlign: 'center',
+                    background: '#fff',
+                    borderRadius: '8px',
+                    padding: '8px',
+                    border: '1px solid #e5e7eb',
+                  }}
+                >
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: '#1a1a2e' }}>{item.value}</div>
+                  <div style={{ fontSize: '10px', color: '#888' }}>{item.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {quota.monthly_cap && (
+              <div style={{ fontSize: '12px', color: '#555', marginBottom: '6px' }}>
+                Monthly cap: <strong>{quota.monthly_cap} days</strong> | Used this month:{' '}
+                <strong>{quota.period_used} days</strong>
+                {quota.would_exceed_monthly && (
+                  <span style={{ color: '#dc2626', marginLeft: '8px', fontWeight: 600 }}>
+                    ⚠ Would exceed monthly cap!
+                  </span>
+                )}
+              </div>
+            )}
+
+            {quota.period_approvals?.length > 0 && (
+              <details style={{ fontSize: '12px', marginTop: '6px' }}>
+                <summary style={{ cursor: 'pointer', color: '#555', fontWeight: 600 }}>
+                  {quota.period_approvals.length} existing leave(s) this month
+                </summary>
+                {quota.period_approvals.map(a => (
+                  <div key={a.id} style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', color: '#555' }}>
+                    {a.start} → {a.end} ({a.days} days) — {a.status}
+                    {a.approved_by && (
+                      <span style={{ color: '#6b7280' }}>
+                        {' '}
+                        · Approved by: <strong>{a.approved_by}</strong> ({a.approved_by_role})
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </details>
+            )}
           </div>
         )}
 
         {/* Submit */}
         <button
           onClick={handleSubmit}
-          disabled={saving || insufficient}
+          disabled={saving || insufficient || (quota && !quota.can_apply)}
           style={{
-            width: '100%', padding: '13px',
-            background: insufficient ? '#e5e7eb' : saving ? '#999' : '#1a1a2e',
-            color: insufficient ? '#aaa' : '#fff',
-            border: 'none', borderRadius: '10px',
-            fontSize: '14px', fontWeight: 700, cursor: insufficient || saving ? 'not-allowed' : 'pointer',
+            width: '100%',
+            padding: '13px',
+            background: insufficient || (quota && !quota.can_apply) ? '#e5e7eb' : saving ? '#999' : '#1a1a2e',
+            color: insufficient || (quota && !quota.can_apply) ? '#aaa' : '#fff',
+            border: 'none',
+            borderRadius: '10px',
+            fontSize: '14px',
+            fontWeight: 700,
+            cursor: insufficient || saving || (quota && !quota.can_apply) ? 'not-allowed' : 'pointer',
           }}
         >
           {saving ? 'Submitting...' : 'Submit Leave Request'}
@@ -196,4 +379,14 @@ export default function ApplyLeave({ onApplied }) {
 
 const fieldWrap = { marginBottom: '16px' }
 const lbl = { fontSize: '12px', color: '#555', fontWeight: 500, display: 'block', marginBottom: '5px' }
-const inp = { width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', outline: 'none', boxSizing: 'border-box', fontFamily: 'Inter, sans-serif', display: 'block' }
+const inp = {
+  width: '100%',
+  padding: '9px 12px',
+  borderRadius: '8px',
+  border: '1px solid #ddd',
+  fontSize: '13px',
+  outline: 'none',
+  boxSizing: 'border-box',
+  fontFamily: 'Inter, sans-serif',
+  display: 'block',
+}

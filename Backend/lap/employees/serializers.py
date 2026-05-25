@@ -45,12 +45,8 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
             return obj.manager.get_full_name() or obj.manager.username
         return None
 
-
+# employees/serializers.py — updated CreateEmployeeSerializer (replace class)
 class CreateEmployeeSerializer(serializers.Serializer):
-    """
-    Creates User + EmployeeProfile in one API call.
-    Frontend sends one form — backend handles both tables.
-    """
     # User fields
     username      = serializers.CharField()
     email         = serializers.EmailField()
@@ -59,6 +55,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
     password      = serializers.CharField(write_only=True)
     role          = serializers.ChoiceField(choices=['manager', 'hr', 'employee'])
     employee_type = serializers.ChoiceField(choices=['regular', 'contract', 'parttime', 'intern'])
+    custom_role   = serializers.IntegerField(required=False, allow_null=True)  # CustomRole id
 
     # Profile fields
     emp_code      = serializers.CharField()
@@ -73,6 +70,11 @@ class CreateEmployeeSerializer(serializers.Serializer):
         queryset=User.objects.all(), required=False, allow_null=True
     )
     date_of_birth = serializers.DateField(required=False, allow_null=True)
+
+    # Permission overrides — list of {code, is_granted}
+    permission_overrides = serializers.ListField(
+        child=serializers.DictField(), required=False, default=list
+    )
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
@@ -90,16 +92,26 @@ class CreateEmployeeSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        # Split user vs profile data
-        user_data = {
-            'username':      validated_data['username'],
-            'email':         validated_data['email'],
-            'first_name':    validated_data['first_name'],
-            'last_name':     validated_data['last_name'],
-            'role':          validated_data['role'],
-            'employee_type': validated_data['employee_type'],
-        }
-        user = User(**user_data)
+        from accounts.models import CustomRole
+        from utils.models import Permission, UserPermissionOverride
+        from notifications.utils import notify_role
+
+        permission_overrides = validated_data.pop('permission_overrides', [])
+        custom_role_id = validated_data.pop('custom_role', None)
+
+        user = User(
+            username      = validated_data['username'],
+            email         = validated_data['email'],
+            first_name    = validated_data['first_name'],
+            last_name     = validated_data['last_name'],
+            role          = validated_data['role'],
+            employee_type = validated_data['employee_type'],
+        )
+        if custom_role_id:
+            try:
+                user.custom_role = CustomRole.objects.get(pk=custom_role_id)
+            except CustomRole.DoesNotExist:
+                pass
         user.set_password(validated_data['password'])
         user.save()
 
@@ -113,6 +125,28 @@ class CreateEmployeeSerializer(serializers.Serializer):
             address       = validated_data.get('address', ''),
             manager       = validated_data.get('manager'),
             date_of_birth = validated_data.get('date_of_birth'),
+        )
+
+        # Save per-employee permission overrides
+        for override in permission_overrides:
+            code = override.get('code')
+            is_granted = override.get('is_granted', True)
+            try:
+                perm = Permission.objects.get(code=code)
+                UserPermissionOverride.objects.create(
+                    user=user, permission=perm,
+                    is_granted=is_granted,
+                    reason='Set at creation'
+                )
+            except Permission.DoesNotExist:
+                pass
+
+        # Notify admins/superadmins of new employee
+        notify_role(
+            roles=['superadmin', 'admin'],
+            title=f"New Employee Added: {user.get_full_name()}",
+            body=f"{user.get_full_name()} ({user.get_display_role()}) has been added to the system.",
+            notif_type='new_account'
         )
 
         return user
