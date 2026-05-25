@@ -1,4 +1,4 @@
-// src/App.jsx — complete Phase 7+8
+// src/App.jsx
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 
@@ -15,6 +15,8 @@ import LeavePage         from './pages/leave/LeavePage'
 import PayrollPage       from './pages/payroll/PayrollPage'
 import ReportsPage       from './pages/reports/ReportsPage'
 import ProfileSettings   from './pages/settings/ProfileSettings'
+import SystemSettings    from './pages/settings/SystemSettings'
+import NotificationsPage from './pages/notifications/NotificationsPage'
 import ProtectedRoute    from './components/ProtectedRoute'
 
 export default function App() {
@@ -29,18 +31,20 @@ export default function App() {
         <Route path="/dashboard" element={<ProtectedRoute><Shell /></ProtectedRoute>}>
           <Route index element={<Dashboard />} />
 
-          <Route path="employees"   element={<ProtectedRoute requiredPermission="view_employees"><EmployeesPage /></ProtectedRoute>} />
-          <Route path="departments" element={<ProtectedRoute requiredPermission="view_departments"><DepartmentsPage /></ProtectedRoute>} />
-          <Route path="attendance"  element={<ProtectedRoute requiredPermission="view_attendance"><AttendancePage /></ProtectedRoute>} />
-          <Route path="leave"       element={<ProtectedRoute requiredPermission="view_leave"><LeavePage /></ProtectedRoute>} />
-          <Route path="payroll"     element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
-          <Route path="payslip"     element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
+          <Route path="employees"     element={<ProtectedRoute requiredPermission="view_employees"><EmployeesPage /></ProtectedRoute>} />
+          <Route path="departments"   element={<ProtectedRoute requiredPermission="view_departments"><DepartmentsPage /></ProtectedRoute>} />
+          <Route path="attendance"    element={<ProtectedRoute requiredPermission="view_attendance"><AttendancePage /></ProtectedRoute>} />
+          <Route path="leave"         element={<ProtectedRoute requiredPermission="view_leave"><LeavePage /></ProtectedRoute>} />
+          <Route path="payroll"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
+          <Route path="payslip"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
+          <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage /></ProtectedRoute>} />
 
-          {/* Phase 7 — Reports */}
-          <Route path="reports"     element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage /></ProtectedRoute>} />
+          {/* Notifications — all roles */}
+          <Route path="notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
 
-          {/* Phase 8 — Settings (all roles) */}
-          <Route path="settings"    element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+          {/* Settings — profile for all, system for admin/hr */}
+          <Route path="settings"        element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+          <Route path="settings/system" element={<ProtectedRoute><SystemSettings /></ProtectedRoute>} />
 
           <Route path="permissions" element={<ProtectedRoute requiredPermission="manage_permissions"><PermissionManager /></ProtectedRoute>} />
         </Route>
