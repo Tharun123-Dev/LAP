@@ -39,7 +39,12 @@ SETTINGS = [
     dict(key='regularization_window_days', value='7', value_type='integer', category='attendance',
          label='Regularization Window (Days)',
          description='Employee can request attendance correction within this many days.'),
-
+    dict(key='late_marks_per_half_day', value='3', value_type='integer', category='attendance',
+         label='Late Marks per Half-Day LOP',
+         description='Number of late arrivals in a month that triggers 0.5 LOP deduction. Default: 3 (so 6 lates = 1.0 LOP).'),
+    dict(key='late_marks_per_half_day', value='3', value_type='integer', category='attendance',
+         label='Late Marks per Half-Day LOP',
+         description='Number of late arrivals that trigger 0.5 LOP. Default 3 means 3 late = 0.5 LOP, 6 late = 1.0 LOP.'),
     # ─── LEAVE ────────────────────────────────────────────────────
     dict(key='cl_days_per_year',      value='12',    value_type='integer',  category='leave',
          label='Casual Leave (CL) — Days/Year (Regular)',

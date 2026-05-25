@@ -81,33 +81,46 @@ class DeleteNotificationView(APIView):
 
 # ─── System Settings Views ────────────────────────────────────────────────────
 
+# Keys here match exactly what seed_system_settings.py and settings_helper.py use.
+# This seeds only the critical keys needed on first GET — full seed is via management command.
 DEFAULT_SETTINGS = [
-    # Attendance
-    {'key': 'standard_hours',    'label': 'Standard Work Hours/Day',   'value': '8',   'category': 'attendance', 'description': 'Number of hours per working day'},
-    {'key': 'work_days_per_week','label': 'Work Days Per Week',         'value': '5',   'category': 'attendance', 'description': 'Standard working days in a week'},
-    {'key': 'grace_period_mins', 'label': 'Grace Period (Minutes)',     'value': '15',  'category': 'attendance', 'description': 'Minutes allowed after shift start before marking Late'},
-    {'key': 'half_day_hours',    'label': 'Half-Day Threshold (Hours)', 'value': '4',   'category': 'attendance', 'description': 'Hours worked below which marks half-day absent'},
+    # Attendance — keys must match settings_helper.py
+    {'key': 'work_hours_per_day',       'label': 'Work Hours Per Day',            'value': '8',          'value_type': 'integer',  'category': 'attendance', 'description': 'Standard hours per working day'},
+    {'key': 'work_days_per_week',       'label': 'Work Days Per Week',            'value': '5',          'value_type': 'integer',  'category': 'attendance', 'description': 'Working days per week'},
+    {'key': 'work_start_time',          'label': 'Work Start Time',               'value': '09:00',      'value_type': 'time',     'category': 'attendance', 'description': 'Shift start time (HH:MM)'},
+    {'key': 'work_end_time',            'label': 'Work End Time',                 'value': '18:00',      'value_type': 'time',     'category': 'attendance', 'description': 'Shift end time (HH:MM)'},
+    {'key': 'grace_period_minutes',     'label': 'Grace Period (Minutes)',        'value': '15',         'value_type': 'integer',  'category': 'attendance', 'description': 'Minutes after shift start before marking Late'},
+    {'key': 'half_day_hours',           'label': 'Half-Day Threshold (Hours)',    'value': '4',          'value_type': 'decimal',  'category': 'attendance', 'description': 'Hours worked below which = half day'},
+    {'key': 'late_marks_per_half_day',  'label': 'Late Marks per Half-Day LOP',  'value': '3',          'value_type': 'integer',  'category': 'attendance', 'description': 'Number of late marks that trigger 0.5 LOP deduction'},
+    {'key': 'weekend_days',             'label': 'Weekend Days',                  'value': '["saturday","sunday"]', 'value_type': 'json', 'category': 'general', 'description': 'JSON list of weekend day names'},
     # Leave
-    {'key': 'advance_notice_cl', 'label': 'Casual Leave Advance Notice (Days)', 'value': '2', 'category': 'leave', 'description': 'Min days advance notice required for Casual Leave'},
-    {'key': 'sick_cert_days',    'label': 'Sick Leave Certificate After (Days)', 'value': '2', 'category': 'leave', 'description': 'Medical cert required after this many consecutive sick days'},
-    {'key': 'sandwich_rule',     'label': 'Sandwich Rule Enabled',      'value': 'true','category': 'leave', 'description': 'Count sandwiched weekends as leave days'},
-    {'key': 'carry_fwd_max_el',  'label': 'Max Carry-Forward (Earned Leave)', 'value': '45', 'category': 'leave', 'description': 'Maximum days of Earned Leave that can be carried forward'},
+    {'key': 'cl_advance_notice_days',   'label': 'CL Advance Notice (Days)',     'value': '2',          'value_type': 'integer',  'category': 'leave',      'description': 'Min advance notice days for Casual Leave'},
+    {'key': 'sl_doc_required_after_days','label': 'SL Certificate After (Days)', 'value': '2',          'value_type': 'integer',  'category': 'leave',      'description': 'Medical cert required after N sick days'},
+    {'key': 'sandwich_rule_enabled',    'label': 'Sandwich Rule Enabled',        'value': 'true',       'value_type': 'boolean',  'category': 'leave',      'description': 'Count sandwiched weekends as leave'},
+    {'key': 'el_max_carry_forward',     'label': 'Max EL Carry Forward (Days)',  'value': '45',         'value_type': 'integer',  'category': 'leave',      'description': 'Max Earned Leave days that carry forward'},
     # Payroll
-    {'key': 'payroll_day',       'label': 'Payroll Processing Day',     'value': '1',   'category': 'payroll', 'description': 'Day of month payroll is processed (1 = 1st)'},
-    {'key': 'ot_multiplier',     'label': 'Overtime Multiplier',        'value': '1.5', 'category': 'payroll', 'description': 'Overtime pay multiplier (e.g., 1.5 = 1.5x hourly rate)'},
-    {'key': 'esi_threshold',     'label': 'ESI Wage Threshold (₹)',     'value': '21000','category': 'payroll', 'description': 'Employees earning below this are ESI eligible'},
+    {'key': 'payroll_lock_day',         'label': 'Payroll Lock Day',             'value': '25',         'value_type': 'integer',  'category': 'payroll',    'description': 'Day of month attendance locks for payroll'},
+    {'key': 'overtime_multiplier',      'label': 'Overtime Multiplier',          'value': '1.5',        'value_type': 'decimal',  'category': 'payroll',    'description': 'OT pay multiplier (1.5 = 1.5x hourly rate)'},
+    {'key': 'esi_threshold_salary',     'label': 'ESI Wage Threshold (₹)',       'value': '21000',      'value_type': 'integer',  'category': 'payroll',    'description': 'Gross below this = ESI applicable'},
     # General
-    {'key': 'company_name',      'label': 'Company Name',               'value': 'My Company', 'category': 'general', 'description': 'Company name shown on payslips and emails'},
-    {'key': 'timezone',          'label': 'Timezone',                   'value': 'Asia/Kolkata','category': 'general', 'description': 'Default timezone for the system'},
-    {'key': 'fiscal_year_start', 'label': 'Fiscal Year Start Month',    'value': '4',   'category': 'general', 'description': 'Month number fiscal year starts (4 = April)'},
+    {'key': 'company_name',             'label': 'Company Name',                 'value': 'My Company', 'value_type': 'string',   'category': 'general',    'description': 'Company name on payslips and emails'},
+    {'key': 'timezone',                 'label': 'Timezone',                     'value': 'Asia/Kolkata','value_type': 'string',  'category': 'general',    'description': 'System timezone'},
+    {'key': 'fiscal_year_start_month',  'label': 'Fiscal Year Start Month',      'value': '4',          'value_type': 'integer',  'category': 'general',    'description': 'Month fiscal year starts (4=April)'},
 ]
 
 
 def seed_default_settings():
     for s in DEFAULT_SETTINGS:
-        SystemSetting.objects.get_or_create(key=s['key'], defaults=s)
-
-
+        SystemSetting.objects.get_or_create(
+            key=s['key'],
+            defaults={
+                'value':       s['value'],
+                'value_type':  s.get('value_type', 'string'),
+                'label':       s['label'],
+                'category':    s['category'],
+                'description': s['description'],
+            }
+        )
 class SystemSettingsView(APIView):
     """GET /api/system-settings/ — list all, POST to bulk update (Admin only)."""
 

@@ -15,24 +15,34 @@ from .serializers import (
     RegularizationSerializer,
     HolidaySerializer,
 )
-
-STANDARD_HOURS = Decimal('8.0')
-GRACE_MINUTES  = 15
-SHIFT_START    = time(9, 0)   # 9:00 AM
+from .settings_helper import (
+    get_shift_start,
+    get_grace_minutes,
+    get_standard_hours,
+    get_half_day_hours,
+)
 
 
 def _get_status(check_in, check_out, hours_worked):
-    """Determine attendance status from times."""
+    """
+    Determine attendance status — reads ALL thresholds live from SystemSetting.
+    Grace period, shift start, half-day hours — all from DB, never hardcoded.
+    """
     if not check_in:
         return 'absent'
-    # checkout missing — treat as half_day until checkout happens
     if not check_out:
         return 'half_day'
-    grace = datetime.combine(date.today(), SHIFT_START) + timedelta(minutes=GRACE_MINUTES)
-    ci    = datetime.combine(date.today(), check_in)
-    if hours_worked < Decimal('4.0'):
+
+    shift_start    = get_shift_start()
+    grace_minutes  = get_grace_minutes()
+    half_day_hours = Decimal(str(get_half_day_hours()))
+
+    grace_cutoff = datetime.combine(date.today(), shift_start) + timedelta(minutes=grace_minutes)
+    ci           = datetime.combine(date.today(), check_in)
+
+    if hours_worked < half_day_hours:
         return 'half_day'
-    if ci > grace:
+    if ci > grace_cutoff:
         return 'late'
     return 'present'
 
@@ -60,18 +70,18 @@ class CheckInView(APIView):
         if existing:
             existing.check_in = now_time
             existing.is_wfh   = is_wfh
-            existing.status   = 'half_day'   # incomplete until checkout
+            existing.status   = 'half_day'
             existing.note     = 'Checked in — awaiting checkout'
             existing.save()
             record = existing
         else:
             record = AttendanceRecord.objects.create(
-                employee  = request.user,
-                date      = today,
-                check_in  = now_time,
-                is_wfh    = is_wfh,
-                status    = 'half_day',       # incomplete until checkout
-                note      = 'Checked in — awaiting checkout',
+                employee = request.user,
+                date     = today,
+                check_in = now_time,
+                is_wfh   = is_wfh,
+                status   = 'half_day',
+                note     = 'Checked in — awaiting checkout',
             )
 
         return Response({
@@ -107,16 +117,17 @@ class CheckOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        standard_hours = Decimal(str(get_standard_hours()))
+
         ci   = datetime.combine(today, record.check_in)
         co   = datetime.combine(today, now_time)
         diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
-        ot   = max(diff - STANDARD_HOURS, Decimal('0'))
+        ot   = max(diff - standard_hours, Decimal('0'))
 
         record.check_out    = now_time
         record.hours_worked = diff
         record.ot_hours     = ot
         record.status       = _get_status(record.check_in, now_time, diff)
-        # Clear the awaiting-checkout note on successful checkout
         if 'awaiting checkout' in (record.note or '').lower():
             record.note = ''
         record.save()
@@ -191,7 +202,6 @@ class MyAttendanceView(APIView):
             end_date__gte=date(year, month, 1),
         ).select_related('leave_type')
 
-        # Build a map: date_str -> { name, is_lop }
         leave_dates = {}
         for lr in approved_leaves:
             is_lop = (not lr.leave_type.is_paid) or (lr.leave_type.code == 'LOP')
@@ -213,27 +223,23 @@ class MyAttendanceView(APIView):
         record_map = {str(r.date): r for r in records}
         serialized = list(AttendanceRecordSerializer(records, many=True).data)
 
-        # ── FIX: mark records with missing checkout as half_day in the response
-        # The DB already stores status='half_day' from check-in time, but
-        # hours_worked=0 and check_out=None. We explicitly set status='half_day'
-        # here so the summary correctly counts them and payroll sees the right value.
         today_str = str(date.today())
+
+        # Mark missing-checkout records as half_day
         for rec in serialized:
             if (
                 rec.get('check_in') and
                 not rec.get('check_out') and
-                rec.get('date') != today_str   # today may still check out
+                rec.get('date') != today_str
             ):
                 rec['status'] = 'half_day'
 
-        # Inject synthetic records for approved leave days with no attendance record
         existing_dates = set(record_map.keys())
 
         for date_str, leave_info in leave_dates.items():
             leave_status = 'lop_leave' if leave_info['is_lop'] else 'leave'
 
             if date_str not in existing_dates:
-                # No attendance record — inject synthetic one
                 serialized.append({
                     'id':           None,
                     'date':         date_str,
@@ -247,7 +253,6 @@ class MyAttendanceView(APIView):
                     'is_lop':       leave_info['is_lop'],
                 })
             else:
-                # Attendance record exists — patch status and add leave info
                 for rec in serialized:
                     if rec.get('date') == date_str:
                         if rec.get('status') in ('absent', 'leave', 'not_started'):
@@ -273,12 +278,25 @@ class MyAttendanceView(APIView):
             'total_ot':    float(sum(r.ot_hours     for r in records if r.ot_hours)),
         }
 
+        # ── 6. Active policy block — so frontend can display current rules ────
+        shift_start   = get_shift_start()
+        grace_minutes = get_grace_minutes()
+        late_cutoff   = (
+            datetime.combine(date.today(), shift_start) +
+            timedelta(minutes=grace_minutes)
+        ).strftime('%H:%M')
+
         return Response({
             'month':    month,
             'year':     year,
             'summary':  summary,
             'records':  serialized,
             'holidays': list(holidays),
+            'policy': {
+                'shift_start':   shift_start.strftime('%H:%M'),
+                'grace_minutes': grace_minutes,
+                'late_cutoff':   late_cutoff,
+            },
         })
 
 
@@ -294,17 +312,13 @@ class AllAttendanceView(APIView):
 
         records = AttendanceRecord.objects.select_related(
             'employee', 'employee__profile'
-        ).filter(
-            date__year=year, date__month=month
-        )
+        ).filter(date__year=year, date__month=month)
 
         if emp_id:
             records = records.filter(employee_id=emp_id)
 
         return Response(AttendanceRecordSerializer(records, many=True).data)
 
-
-# ── REGULARIZATION — APPLY ────────────────────────────────────────────────────
 
 # ── REGULARIZATION — APPLY ────────────────────────────────────────────────────
 
@@ -324,7 +338,6 @@ class ApplyRegularizationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Resolve record — either by ID or by date
         if record_id:
             try:
                 record = AttendanceRecord.objects.get(
@@ -341,7 +354,6 @@ class ApplyRegularizationView(APIView):
                     {'error': 'Invalid date format. Use YYYY-MM-DD'},
                     status=400
                 )
-
             record, created = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
                 date=target_date,
@@ -353,28 +365,22 @@ class ApplyRegularizationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Block if attendance is locked (payroll processed)
         if record.is_locked:
             return Response(
                 {'error': 'Attendance is locked for this date. Cannot regularize.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Block if regularization already submitted
         if hasattr(record, 'regularization'):
             existing = record.regularization
-
             if existing.status == 'pending':
                 return Response(
                     {'error': 'A pending regularization already exists for this date.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-
-            # Allow resubmit if rejected
             if existing.status == 'rejected':
                 existing.delete()
 
-        # Create regularization
         reg = AttendanceRegularization.objects.create(
             attendance         = record,
             employee           = request.user,
@@ -383,7 +389,6 @@ class ApplyRegularizationView(APIView):
             requested_checkout = req_checkout or None,
         )
 
-        # ── NOTIFICATION ─────────────────────────────────────────────
         try:
             from notifications.utils import notify_attendance_regularization
             notify_attendance_regularization(reg)
@@ -394,6 +399,7 @@ class ApplyRegularizationView(APIView):
             RegularizationSerializer(reg).data,
             status=status.HTTP_201_CREATED
         )
+
 
 # ── REGULARIZATION — MY LIST ──────────────────────────────────────────────────
 
@@ -422,26 +428,18 @@ class AllRegularizationsView(APIView):
 
 # ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
 
-# ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
-
 class ApproveRegularizationView(APIView):
     permission_classes = [make_permission('approve_regularize')]
 
     def post(self, request, pk):
-        action = request.data.get('action')   # approve / reject
+        action = request.data.get('action')
         note   = request.data.get('note', '')
 
         if action not in ['approve', 'reject']:
-            return Response(
-                {'error': 'action must be approve or reject'},
-                status=400
-            )
+            return Response({'error': 'action must be approve or reject'}, status=400)
 
         try:
-            reg = AttendanceRegularization.objects.select_related(
-                'attendance'
-            ).get(pk=pk)
-
+            reg = AttendanceRegularization.objects.select_related('attendance').get(pk=pk)
         except AttendanceRegularization.DoesNotExist:
             return Response({'error': 'Not found'}, status=404)
 
@@ -451,55 +449,42 @@ class ApproveRegularizationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Update status
         reg.status        = 'approved' if action == 'approve' else 'rejected'
         reg.approved_by   = request.user
         reg.approver_note = note
         reg.save()
 
-        # ── NOTIFICATION ─────────────────────────────────────────────
         try:
             from notifications.utils import notify_regularization_actioned
             notify_regularization_actioned(reg, action, request.user)
         except Exception as e:
             print("Regularization action notification error:", e)
 
-        # ── UPDATE ATTENDANCE IF APPROVED ───────────────────────────
         if action == 'approve':
             record = reg.attendance
 
             if reg.requested_checkin:
                 record.check_in = reg.requested_checkin
-
             if reg.requested_checkout:
                 record.check_out = reg.requested_checkout
 
             if record.check_in and record.check_out:
-                ci = datetime.combine(date.today(), record.check_in)
-                co = datetime.combine(date.today(), record.check_out)
-
-                diff = Decimal(
-                    str(round((co - ci).total_seconds() / 3600, 2))
-                )
+                standard_hours = Decimal(str(get_standard_hours()))
+                ci   = datetime.combine(date.today(), record.check_in)
+                co   = datetime.combine(date.today(), record.check_out)
+                diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
 
                 record.hours_worked = diff
-                record.ot_hours = max(
-                    diff - STANDARD_HOURS,
-                    Decimal('0')
-                )
-
-                record.status = _get_status(
-                    record.check_in,
-                    record.check_out,
-                    diff
-                )
+                record.ot_hours     = max(diff - standard_hours, Decimal('0'))
+                record.status       = _get_status(record.check_in, record.check_out, diff)
 
             record.save()
 
         return Response({
             'message': f'Regularization {reg.status}',
-            'data': RegularizationSerializer(reg).data,
+            'data':    RegularizationSerializer(reg).data,
         })
+
 
 # ── HOLIDAYS ──────────────────────────────────────────────────────────────────
 
@@ -511,4 +496,3 @@ class HolidayListView(generics.ListCreateAPIView):
         if self.request.method == 'GET':
             return [IsAuthenticatedUser()]
         return [make_permission('manage_settings')()]
-    

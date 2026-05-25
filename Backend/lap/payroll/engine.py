@@ -1,14 +1,7 @@
 # payroll/engine.py
 """
-Payroll engine:
-1. Approved paid leave → present, zero LOP
-2. Approved half-day paid leave → present, zero LOP
-3. Approved LOP leave → counted as LOP
-4. Absent with no leave → LOP
-5. Half-day attendance with no leave → 0.5 LOP
-6. Late policy: every 3 late = 0.5 LOP (so 6 late = 1.0 LOP, 9 = 1.5 LOP...)
-7. lop_deduction capped at gross earned
-8. net_pay floored at zero
+Payroll engine — ALL policy values read dynamically from SystemSetting via settings_helper.
+No hardcoded grace, shift, late, or hours values anywhere.
 """
 import calendar
 from decimal import Decimal, ROUND_HALF_UP
@@ -16,15 +9,12 @@ from datetime import date, timedelta
 
 from accounts.models import User
 from attendance.models import AttendanceRecord
+from attendance.settings_helper import get_standard_hours, get_late_per_half_day
 from leave.models import LeaveRequest
 from .models import SalaryStructure, PayrollRun, PayrollEntry
 
 
 ROUND2 = lambda v: Decimal(v).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-# Late policy constants — change these to adjust the rule
-LATE_PER_HALF_DAY = 3   # every 3 lates = 0.5 LOP
-                        # so every 6 lates = 1.0 LOP automatically
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -32,7 +22,6 @@ LATE_PER_HALF_DAY = 3   # every 3 lates = 0.5 LOP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_active_structure(employee, as_of_date):
-    # Primary: most recent structure effective on or before as_of_date
     structure = SalaryStructure.objects.filter(
         employee=employee,
         is_active=True,
@@ -42,9 +31,6 @@ def get_active_structure(employee, as_of_date):
     if structure:
         return structure
 
-    # Fallback: structure was created AFTER the payroll month
-    # (admin created salary today and is running historical/current payroll).
-    # Return the earliest active structure so no employee is skipped.
     return SalaryStructure.objects.filter(
         employee=employee,
         is_active=True,
@@ -67,7 +53,6 @@ def get_approved_leave_dates(employee, year, month):
       paid_full_dates — full-day approved paid leave  → present, 0 LOP
       paid_half_dates — half-day approved paid leave  → present, 0 LOP
       lop_dates       — approved LOP leave            → LOP
-    Weekends excluded at source.
     """
     start_of_month = date(year, month, 1)
     end_of_month   = date(year, month, calendar.monthrange(year, month)[1])
@@ -102,23 +87,20 @@ def get_approved_leave_dates(employee, year, month):
 
 def calculate_late_lop(late_count):
     """
-    Convert total late marks for the month into LOP days.
-    Every LATE_PER_HALF_DAY lates = 0.5 LOP.
-    e.g. 3 late → 0.5 LOP, 6 late → 1.0 LOP, 7 late → 1.0 LOP, 9 late → 1.5 LOP
+    Reads 'late_marks_per_half_day' from SystemSetting dynamically.
+    e.g. policy=3  → 3 late = 0.5 LOP, 6 late = 1.0 LOP
+    e.g. policy=5  → 5 late = 0.5 LOP, 10 late = 1.0 LOP
     """
-    half_day_units = late_count // LATE_PER_HALF_DAY
+    late_per_half_day = get_late_per_half_day()
+    half_day_units    = late_count // late_per_half_day
     return Decimal(str(half_day_units)) * Decimal('0.5')
 
 
 def get_attendance_summary(employee, year, month):
     """
     Day-by-day walk of the month.
-    Returns:
-      present   — effective present days (Decimal)
-      lop_days  — LOP days from absent/LOP-leave (Decimal)
-      late_lop  — additional LOP days from late policy (Decimal)
-      late_count — raw number of late marks this month (int)
-      ot_hours  — total OT hours (Decimal)
+    Returns: present, lop_days, late_lop, late_count, ot_hours
+    All thresholds read from SystemSetting via settings_helper.
     """
     _, days_in_month = calendar.monthrange(year, month)
 
@@ -141,7 +123,7 @@ def get_attendance_summary(employee, year, month):
     for day in range(1, days_in_month + 1):
         d = date(year, month, day)
 
-        if d.weekday() >= 5:        # skip weekends
+        if d.weekday() >= 5:
             continue
 
         rec = record_map.get(d)
@@ -151,69 +133,60 @@ def get_attendance_summary(employee, year, month):
                 present += Decimal('1')
 
             elif rec.status == 'late':
-                # Count the late — LOP from lates is calculated at month-end
                 present    += Decimal('1')
                 late_count += 1
 
             elif rec.status == 'half_day':
-                # KEY FIX: check_in with no check_out = missing checkout = 0.5 LOP
-                # Without this, missing checkout was treated the same as an approved
-                # paid half-day leave, giving full present credit and 0 LOP.
                 missing_checkout = bool(rec.check_in and not rec.check_out)
                 if missing_checkout:
-                    # Missing checkout: 0.5 LOP unless paid leave covers the day
                     if d in paid_full_dates or d in paid_half_dates:
-                        present += Decimal('1')   # paid leave covers it
+                        present += Decimal('1')
                     else:
                         present += Decimal('0.5')
-                        lop     += Decimal('0.5')  # 0.5 LOP deducted from salary
+                        lop     += Decimal('0.5')
                 else:
-                    # Normal half-day (worked < 4h, checkout present)
                     if d in paid_half_dates or d in paid_full_dates:
-                        present += Decimal('1')   # approved paid leave covers it
+                        present += Decimal('1')
                     else:
                         present += Decimal('0.5')
                         lop     += Decimal('0.5')
 
             elif rec.status == 'absent':
                 if d in paid_full_dates or d in paid_half_dates:
-                    present += Decimal('1')   # paid leave → present
+                    present += Decimal('1')
                 elif d in lop_dates:
-                    lop += Decimal('1')       # LOP leave
+                    lop += Decimal('1')
                 else:
-                    lop += Decimal('1')       # plain absent → LOP
+                    lop += Decimal('1')
 
             elif rec.status in ('leave', 'lop_leave'):
-                # Written by leave approval flow
                 if d in lop_dates:
                     lop += Decimal('1')
                 else:
                     present += Decimal('1')
 
-            elif rec.status in ('holiday',):
+            elif rec.status == 'holiday':
                 present += Decimal('1')
 
             if rec.ot_hours:
                 ot_hours += Decimal(str(rec.ot_hours))
 
         else:
-            # No attendance record
             if d in paid_full_dates or d in paid_half_dates:
                 present += Decimal('1')
             elif d in lop_dates:
                 lop += Decimal('1')
             else:
-                lop += Decimal('1')           # no record, no leave → LOP
+                lop += Decimal('1')
 
-    # Calculate late-based LOP at month end
     late_lop = calculate_late_lop(late_count)
 
     return {
-        'present':     present,
-        'lop_days':    lop,
-        'late_lop':    late_lop,
-        'late_count':  late_count,
-        'ot_hours':    ot_hours,
+        'present':    present,
+        'lop_days':   lop,
+        'late_lop':   late_lop,
+        'late_count': late_count,
+        'ot_hours':   ot_hours,
     }
 
 
@@ -233,7 +206,6 @@ def calculate_ot_pay(basic, working_days, ot_hours):
 
 
 def calculate_tds(gross, emp_type):
-    """Simplified monthly TDS on annualised gross."""
     if emp_type == 'contract':
         return ROUND2(gross * Decimal('0.10'))
     if emp_type in ('intern', 'parttime'):
@@ -258,8 +230,6 @@ def process_payroll_run(payroll_run: PayrollRun):
     year  = payroll_run.year
     working_days, days_in_month = calculate_working_days(year, month)
 
-    # Use last day of the month so any structure created within the month is found.
-    # This fixes the bug where as_of=1st caused mid-month structures to be missed.
     as_of = date(year, month, days_in_month)
 
     employees = User.objects.filter(is_active=True)
@@ -282,16 +252,13 @@ def process_payroll_run(payroll_run: PayrollRun):
         late_count = att['late_count']
         ot_hours   = att['ot_hours']
 
-        # Total LOP = absence LOP + late-based LOP
         total_lop = lop_days + late_lop
 
-        # Effective present days
         effective_present = max(
             min(Decimal(str(working_days)) - total_lop, Decimal(str(working_days))),
             Decimal('0')
         )
 
-        # Pro-rate earnings
         basic     = prorate(structure.basic,             effective_present, working_days)
         hra       = prorate(structure.hra,               effective_present, working_days)
         da        = prorate(structure.da,                effective_present, working_days)
@@ -303,22 +270,18 @@ def process_payroll_run(payroll_run: PayrollRun):
 
         gross = basic + hra + da + special + transport + medical + other + ot_pay
 
-        # LOP deduction — capped at gross so net never goes negative from LOP alone
         per_day_gross = ROUND2(
             Decimal(str(structure.gross)) / Decimal(str(working_days))
         ) if working_days > 0 else Decimal('0')
         lop_deduction = min(ROUND2(per_day_gross * total_lop), gross)
 
-        # Statutory deductions
         pf_emp  = structure.pf_employee
         esi_emp = structure.esi_employee
         pt      = structure.pt
         tds     = calculate_tds(gross, emp.employee_type)
 
         total_deductions = ROUND2(pf_emp + esi_emp + pt + tds + lop_deduction)
-
-        # Net pay — floored at zero
-        net_pay = max(ROUND2(gross - total_deductions), Decimal('0'))
+        net_pay          = max(ROUND2(gross - total_deductions), Decimal('0'))
 
         entry = PayrollEntry.objects.create(
             payroll_run       = payroll_run,
@@ -327,7 +290,7 @@ def process_payroll_run(payroll_run: PayrollRun):
             total_days        = days_in_month,
             working_days      = working_days,
             present_days      = effective_present,
-            lop_days          = total_lop,        # total LOP including late-based
+            lop_days          = total_lop,
             ot_hours          = ot_hours,
             basic             = basic,
             hra               = hra,
