@@ -104,10 +104,10 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ── CORS & CSRF ──────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    # 'http://localhost:5173',
-    # 'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:3000',
     'https://lap-phi.vercel.app',
-    # 'https://lapsystem.vercel.app',
+    'https://lapsystem.vercel.app',
 ]
 
 # Also include any FRONTEND_URL set via Render env var
@@ -118,11 +118,11 @@ if _frontend and _frontend not in CORS_ALLOWED_ORIGINS:
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_TRUSTED_ORIGINS = [
-    # 'http://localhost:5173',
-    # 'http://localhost:3000',
+    'http://localhost:5173',
+    'http://localhost:3000',
     'https://lap-phi.vercel.app',
-    # 'https://lapsystem.vercel.app',
-    # 'https://lap-b9vi.onrender.com',
+    'https://lapsystem.vercel.app',
+    'https://lap-b9vi.onrender.com',
 ]
 
 # ── REST FRAMEWORK ───────────────────────────────────────────────

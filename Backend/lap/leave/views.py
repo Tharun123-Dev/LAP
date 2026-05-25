@@ -1,5 +1,5 @@
 from django.shortcuts import render
-
+from decimal import Decimal
 # Create your views here.
 # leave/views.py
 from datetime import date
@@ -159,7 +159,7 @@ class ApplyLeaveView(APIView):
             doc_url    = request.data.get('doc_url', ''),
         )
 
-        balance.pending += days
+        balance.pending += Decimal(str(days))
         balance.save()
 
         return Response(
@@ -333,7 +333,7 @@ class LeaveActionView(APIView):
             )
 
             if action == 'approve':
-                balance.used += leave.days
+                balance.used += Decimal(str(leave.days))
 
             balance.save()
 
