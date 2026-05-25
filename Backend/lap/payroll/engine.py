@@ -32,11 +32,23 @@ LATE_PER_HALF_DAY = 3   # every 3 lates = 0.5 LOP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_active_structure(employee, as_of_date):
-    return SalaryStructure.objects.filter(
+    # Primary: most recent structure effective on or before as_of_date
+    structure = SalaryStructure.objects.filter(
         employee=employee,
         is_active=True,
         effective_date__lte=as_of_date,
     ).order_by('-effective_date').first()
+
+    if structure:
+        return structure
+
+    # Fallback: structure was created AFTER the payroll month
+    # (admin created salary today and is running historical/current payroll).
+    # Return the earliest active structure so no employee is skipped.
+    return SalaryStructure.objects.filter(
+        employee=employee,
+        is_active=True,
+    ).order_by('effective_date').first()
 
 
 def calculate_working_days(year, month):
@@ -244,9 +256,11 @@ def calculate_tds(gross, emp_type):
 def process_payroll_run(payroll_run: PayrollRun):
     month = payroll_run.month
     year  = payroll_run.year
-    as_of = date(year, month, 1)
-
     working_days, days_in_month = calculate_working_days(year, month)
+
+    # Use last day of the month so any structure created within the month is found.
+    # This fixes the bug where as_of=1st caused mid-month structures to be missed.
+    as_of = date(year, month, days_in_month)
 
     employees = User.objects.filter(is_active=True)
     created   = []
