@@ -9,7 +9,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')
+# WITH THIS:
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')
+
+# Always include Render and common hosts regardless of env var
+ALLOWED_HOSTS += [
+    'lap-b9vi.onrender.com',
+    '.onrender.com',       # covers any render subdomain
+    'localhost',
+    '127.0.0.1',
+]
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -94,18 +105,18 @@ USE_TZ = True
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS_ALLOWED_ORIGINS = [
-#     os.getenv('FRONTEND_URL', 'http://localhost:5173'),
-    
-# ]
-
 CORS_ALLOWED_ORIGINS = [
-    "https://lapsystem.vercel.app",
+    os.getenv('FRONTEND_URL', 'http://localhost:5173'),
+    
 ]
-CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    "https://lapsystem.vercel.app",
-]
+
+# CORS_ALLOWED_ORIGINS = [
+#     "https://lapsystem.vercel.app",
+# ]
+# CORS_ALLOW_CREDENTIALS = True
+# CSRF_TRUSTED_ORIGINS = [
+#     "https://lapsystem.vercel.app",
+# ]
 
 
 
