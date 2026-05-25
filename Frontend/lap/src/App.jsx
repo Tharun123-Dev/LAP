@@ -13,13 +13,13 @@ import DepartmentsPage   from './pages/departments/DepartmentsPage'
 import AttendancePage    from './pages/attendance/AttendancePage'
 import LeavePage         from './pages/leave/LeavePage'
 import PayrollPage       from './pages/payroll/PayrollPage'
-
+import ReportsPage from './pages/reports/Reportspage';
+import NotificationsPage from './pages/notifications/Notificationspage';
 import ProfileSettings   from './pages/settings/ProfileSettings'
 import SystemSettings    from './pages/settings/SystemSettings'
 
 import ProtectedRoute    from './components/ProtectedRoute'
-import ReportsPage from './pages/reports/Reportspage';
-import NotificationsPage from './pages/notifications/Notificationspage';
+
 export default function App() {
   return (
     <>
