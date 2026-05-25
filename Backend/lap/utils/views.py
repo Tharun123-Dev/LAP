@@ -61,8 +61,16 @@ class UpdateRolePermissionsView(APIView):
     permission_classes = [CanManagePermissions]
 
     def post(self, request, role):
-        granted = request.data.get('granted', [])
-        revoked = request.data.get('revoked', [])
+        # Frontend may send either {"granted": [...], "revoked": [...]}
+        # or a plain list (legacy). Normalise both shapes.
+        data = request.data
+        if isinstance(data, list):
+            # Legacy: treat the whole list as "granted", nothing revoked
+            granted = data
+            revoked = []
+        else:
+            granted = data.get('granted', [])
+            revoked = data.get('revoked', [])
 
         for code in granted:
             try:

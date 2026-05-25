@@ -1,12 +1,17 @@
 # utils/permissions.py
 from rest_framework.permissions import BasePermission
-from .models import RolePermission
 
 
 def make_permission(code):
     """
-    Factory — returns a DRF-compatible permission class.
-    Usage: permission_classes = [make_permission('approve_leave')]
+    Permission check order:
+      1. Superadmin / Admin → always allowed.
+      2. UserPermissionOverride (is_granted=True) → allowed.
+      3. Everything else → denied.
+
+    Role-level defaults (RolePermission) are intentionally NOT checked here.
+    Access is purely override-based: admin must explicitly grant permissions
+    to each user.
     """
     class DynamicPermission(BasePermission):
         perm_code = code
@@ -14,11 +19,11 @@ def make_permission(code):
         def has_permission(self, request, view):
             if not request.user or not request.user.is_authenticated:
                 return False
-            return RolePermission.objects.filter(
-                role=request.user.role,
-                permission__code=self.perm_code,
-                is_granted=True
-            ).exists()
+            # Superadmin and Admin always have full access
+            if request.user.role in ('superadmin', 'admin'):
+                return True
+            # All other users: check explicit override only
+            return request.user.has_perm_code(self.perm_code)
 
     DynamicPermission.__name__ = f'Permission_{code}'
     return DynamicPermission
