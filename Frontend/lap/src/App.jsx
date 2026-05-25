@@ -18,8 +18,8 @@ import ProfileSettings   from './pages/settings/ProfileSettings'
 import SystemSettings    from './pages/settings/SystemSettings'
 
 import ProtectedRoute    from './components/ProtectedRoute'
-import ReportsPage from './pages/reports/ReportsPage';
-import NotificationsPage from './pages/notifications/NotificationsPage';
+import ReportsPage from './pages/reports/Reportspage';
+import NotificationsPage from './pages/notifications/Notificationspage';
 export default function App() {
   return (
     <>
