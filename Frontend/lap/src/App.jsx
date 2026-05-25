@@ -41,7 +41,7 @@ export default function App() {
           <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage/></ProtectedRoute>} />
 
           {/* Notifications — all roles */}
-          <Route path="notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+          <Route path="notifications" element={<ProtectedRoute><NotificationsPage/></ProtectedRoute>} />
 
           {/* Settings — profile for all, system for admin/hr */}
           <Route path="settings"        element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
