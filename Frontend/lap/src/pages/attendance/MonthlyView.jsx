@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getMyAttendanceApi } from '../../api/services/attendance'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 import RegularizeModal from './RegularizeModal'
 import toast from 'react-hot-toast'
 

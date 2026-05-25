@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSelector } from 'react-redux'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 
 const CATEGORY_LABELS = {
   attendance: { label: 'Attendance Settings', icon: '📅' },
