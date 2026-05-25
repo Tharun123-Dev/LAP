@@ -1,11 +1,11 @@
 // src/pages/reports/ReportsPage.jsx
 import { useState } from 'react'
 import usePermission from '../../hooks/usePermission'
-import ReportsDashboard from './Reportsdashboard'
+import ReportsDashboard from './ReportsDashboard'
 import AttendanceReport from './AttendanceReport'
 import LeaveReport      from './LeaveReport'
 import PayrollReport    from './PayrollReport'
-import HeadcountReport  from './HeadCountReport'
+import HeadcountReport  from './HeadcountReport'
 
 export default function ReportsPage() {
   const { can }       = usePermission()
