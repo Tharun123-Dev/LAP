@@ -5,6 +5,7 @@ from .views import (
     MyLeaveBalanceView, InitBalanceView,
     ApplyLeaveView, MyLeaveRequestsView, CancelLeaveView,
     AllLeaveRequestsView, LeaveActionView,
+    LeavePriorUsageView,
 )
 
 urlpatterns = [
@@ -17,4 +18,5 @@ urlpatterns = [
     path('leave/<int:pk>/cancel/',         CancelLeaveView.as_view()),
     path('leave/all/',                     AllLeaveRequestsView.as_view()),
     path('leave/<int:pk>/action/',         LeaveActionView.as_view()),
+    path('leave/<int:pk>/prior-usage/',    LeavePriorUsageView.as_view()),  # NEW
 ]

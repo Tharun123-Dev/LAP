@@ -15,3 +15,6 @@ export const cancelLeaveApi      = (id)        => api.post(ENDPOINTS.LEAVE.CANCE
 
 export const getAllRequestsApi   = (status, emp) => api.get(ENDPOINTS.LEAVE.ALL_REQUESTS, { params: { status, employee: emp } })
 export const leaveActionApi      = (id, action, note) => api.post(ENDPOINTS.LEAVE.ACTION(id), { action, note })
+
+// NEW — fetch prior usage before approving
+export const getLeavePriorUsageApi = (id) => api.get(ENDPOINTS.LEAVE.PRIOR_USAGE(id))

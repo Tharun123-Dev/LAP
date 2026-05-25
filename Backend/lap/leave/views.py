@@ -426,213 +426,96 @@ class LeaveActionView(APIView):
             'message': f'Leave {leave.status}',
             'data': LeaveRequestSerializer(leave).data,
         })
-# leave/views.py — key additions (add these methods to your existing views)
-# ── APPLY LEAVE ───────────────────────────────────────────────────────────────
-
-class ApplyLeaveView(APIView):
-    permission_classes = [make_permission('apply_leave')]
-
-    def post(self, request):
-        lt_id      = request.data.get('leave_type')
-        start_str  = request.data.get('start_date')
-        end_str    = request.data.get('end_date')
-        session    = request.data.get('session', 'full')
-        reason     = request.data.get('reason', '').strip()
-
-        # Validate required fields
-        if not all([lt_id, start_str, end_str, reason]):
-            return Response(
-                {'error': 'leave_type, start_date, end_date, reason are required'},
-                status=400
-            )
-
-        try:
-            start = date.fromisoformat(start_str)
-            end   = date.fromisoformat(end_str)
-
-        except ValueError:
-            return Response(
-                {'error': 'Invalid date format. Use YYYY-MM-DD'},
-                status=400
-            )
-
-        if end < start:
-            return Response(
-                {'error': 'end_date must be after start_date'},
-                status=400
-            )
-
-        try:
-            lt = LeaveType.objects.get(
-                pk=lt_id,
-                is_active=True
-            )
-
-        except LeaveType.DoesNotExist:
-            return Response(
-                {'error': 'Leave type not found'},
-                status=404
-            )
-
-        # Notice period check
-        if lt.min_notice_days > 0:
-            if (start - date.today()).days < lt.min_notice_days:
-                return Response({
-                    'error': f'{lt.name} requires {lt.min_notice_days} day(s) advance notice'
-                }, status=400)
-
-        # Calculate days
-        days = count_working_days(start, end, session)
-
-        # Balance check
-        year = date.today().year
-
-        balance = get_or_create_balance(
-            request.user,
-            lt,
-            year
-        )
-
-        if balance.remaining < days:
-            return Response({
-                'error': f'Insufficient balance. Available: {balance.remaining} days, Requested: {days} days'
-            }, status=400)
-
-        # Check overlapping leave
-        overlap = LeaveRequest.objects.filter(
-            employee=request.user,
-            status__in=['pending', 'approved'],
-            start_date__lte=end,
-            end_date__gte=start,
-        ).exists()
-
-        if overlap:
-            return Response(
-                {'error': 'You already have a leave request overlapping these dates'},
-                status=400
-            )
-
-        # Create leave request
-        leave = LeaveRequest.objects.create(
-            employee=request.user,
-            leave_type=lt,
-            start_date=start,
-            end_date=end,
-            days=days,
-            session=session,
-            reason=reason,
-            doc_url=request.data.get('doc_url', ''),
-        )
-
-        # Hold balance
-        balance.pending += days
-        balance.save()
-
-        # ── NOTIFICATION ─────────────────────────────────────
-        try:
-            from notifications.utils import notify_leave_applied
-            notify_leave_applied(leave)
-
-        except Exception as e:
-            print("Leave notification error:", e)
-
-        return Response(
-            LeaveRequestSerializer(leave).data,
-            status=status.HTTP_201_CREATED
-        )
 
 
+# ── PRIOR USAGE CHECK (for approver confirmation popup) ──────────────────────
 
-# NEW API: Check quota — how many leaves of this type already used in period
-class LeaveQuotaCheckView(APIView):
+class LeavePriorUsageView(APIView):
     """
-    GET /api/leave/quota-check/?employee=<id>&leave_type=<id>&start=<date>&end=<date>
-    Returns: { allowed, used, pending, remaining, would_exceed, period_used }
-    period_used = already approved in same month (for monthly-capped leaves)
+    GET /api/leave/<pk>/prior-usage/
+
+    Called by the approver UI before clicking Approve.
+    Returns how many days of the SAME leave type the employee has already
+    taken (approved + pending) in the SAME calendar month as this request.
+
+    Response:
+    {
+        "employee_name": "...",
+        "leave_type": "Casual Leave",
+        "month": "May 2026",
+        "requested_days": 2.0,
+        "prior_approved": [
+            {"id": 5, "start_date": "2026-05-01", "end_date": "2026-05-02",
+             "days": 2.0, "status": "approved", "applied_at": "..."}
+        ],
+        "prior_pending": [...],
+        "total_prior_days": 2.0,
+        "annual_balance": {"total": 12, "used": 2, "pending": 2, "remaining": 8},
+        "has_prior": true
+    }
     """
-    permission_classes = [IsAuthenticatedUser]
+    permission_classes = [make_permission('approve_leave')]
 
-    def get(self, request):
-        from .models import LeaveBalance, LeaveRequest, LeaveType
-        from notifications.models import SystemSetting
-        import datetime
+    def get(self, request, pk):
+        leave = get_object_or_404(
+            LeaveRequest.objects.select_related('employee', 'leave_type'),
+            pk=pk
+        )
 
-        employee_id  = request.query_params.get('employee', request.user.id)
-        leave_type_id = request.query_params.get('leave_type')
-        start_str    = request.query_params.get('start')
-        end_str      = request.query_params.get('end')
+        month      = leave.start_date.month
+        year       = leave.start_date.year
+        employee   = leave.employee
+        leave_type = leave.leave_type
 
-        if not all([leave_type_id, start_str, end_str]):
-            return Response({'error': 'leave_type, start, end required'}, status=400)
+        # All OTHER requests of the same type this month (exclude self)
+        prior_qs = LeaveRequest.objects.filter(
+            employee   = employee,
+            leave_type = leave_type,
+            start_date__year  = year,
+            start_date__month = month,
+            status__in        = ['approved', 'pending'],
+        ).exclude(pk=pk).order_by('start_date')
 
-        start = datetime.date.fromisoformat(start_str)
-        end   = datetime.date.fromisoformat(end_str)
-        year  = start.year
+        prior_approved = [r for r in prior_qs if r.status == 'approved']
+        prior_pending  = [r for r in prior_qs if r.status == 'pending']
 
+        def fmt(r):
+            return {
+                'id':         r.id,
+                'start_date': str(r.start_date),
+                'end_date':   str(r.end_date),
+                'days':       float(r.days),
+                'status':     r.status,
+                'applied_at': r.applied_at.strftime('%d %b %Y'),
+            }
+
+        total_prior_days = sum(float(r.days) for r in prior_qs)
+
+        # Annual balance snapshot
         try:
             balance = LeaveBalance.objects.get(
-                employee_id=employee_id,
-                leave_type_id=leave_type_id,
-                year=year
+                employee=employee, leave_type=leave_type, year=year
             )
+            annual_balance = {
+                'total':     float(balance.total),
+                'used':      float(balance.used),
+                'pending':   float(balance.pending),
+                'remaining': float(balance.remaining),
+            }
         except LeaveBalance.DoesNotExist:
-            return Response({'error': 'No balance found for this leave type'}, status=404)
+            annual_balance = None
 
-        lt = LeaveType.objects.get(pk=leave_type_id)
-
-        # Check monthly cap from SystemSettings (e.g. cl_monthly_cap)
-        monthly_cap = None
-        cap_key = f"{lt.code.lower()}_monthly_cap"
-        try:
-            setting = SystemSetting.objects.get(key=cap_key)
-            monthly_cap = int(setting.value) if setting.value else None
-        except SystemSetting.DoesNotExist:
-            pass
-
-        # Period-specific (same month) approved/pending leaves
-        period_used = LeaveRequest.objects.filter(
-            employee_id=employee_id,
-            leave_type_id=leave_type_id,
-            status__in=['approved', 'pending'],
-            start_date__year=start.year,
-            start_date__month=start.month
-        ).exclude(status='cancelled')
-
-        period_days = sum(lr.days for lr in period_used)
-
-        # Calculate requested days
-        from leave.utils import count_leave_days
-        requested_days = count_leave_days(start, end)
-
-        would_exceed_annual = (balance.remaining < requested_days)
-        would_exceed_monthly = (
-            monthly_cap is not None and
-            (period_days + requested_days) > monthly_cap
-        )
+        import calendar
+        month_name = f"{calendar.month_name[month]} {year}"
 
         return Response({
-            'leave_type':       lt.name,
-            'annual_allowed':   float(balance.total),
-            'annual_used':      float(balance.used),
-            'annual_pending':   float(balance.pending),
-            'annual_remaining': float(balance.remaining),
-            'monthly_cap':      monthly_cap,
-            'period_used':      float(period_days),
-            'requested_days':   float(requested_days),
-            'would_exceed_annual':  would_exceed_annual,
-            'would_exceed_monthly': would_exceed_monthly,
-            'can_apply':        not would_exceed_annual and not would_exceed_monthly,
-            # Existing approved leaves of this type this month (for admin info)
-            'period_approvals': [
-                {
-                    'id': lr.id,
-                    'days': float(lr.days),
-                    'status': lr.status,
-                    'start': str(lr.start_date),
-                    'end': str(lr.end_date),
-                    'approved_by': lr.approved_by.get_full_name() if lr.approved_by else None,
-                    'approved_by_role': lr.approved_by.get_display_role() if lr.approved_by else None,
-                }
-                for lr in period_used
-            ]
+            'employee_name':    employee.get_full_name() or employee.username,
+            'leave_type':       leave_type.name,
+            'month':            month_name,
+            'requested_days':   float(leave.days),
+            'prior_approved':   [fmt(r) for r in prior_approved],
+            'prior_pending':    [fmt(r) for r in prior_pending],
+            'total_prior_days': total_prior_days,
+            'annual_balance':   annual_balance,
+            'has_prior':        total_prior_days > 0,
         })
