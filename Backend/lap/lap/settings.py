@@ -8,19 +8,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')
-# WITH THIS:
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost').split(',')
-
-# Always include Render and common hosts regardless of env var
 ALLOWED_HOSTS += [
     'lap-b9vi.onrender.com',
-    '.onrender.com',       # covers any render subdomain
+    '.onrender.com',
     'localhost',
     '127.0.0.1',
 ]
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -43,6 +39,7 @@ INSTALLED_APPS = [
     'reports',
     'notifications',
 ]
+
 AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
@@ -105,22 +102,30 @@ USE_TZ = True
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# CORS_ALLOWED_ORIGINS = [
-#     os.getenv('FRONTEND_URL', 'http://localhost:5173'),
-    
-# ]
-
+# ── CORS & CSRF ──────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = [
-    "https://lapsystem.vercel.app",
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://lap-phi.vercel.app',
+    'https://lapsystem.vercel.app',
 ]
+
+# Also include any FRONTEND_URL set via Render env var
+_frontend = os.getenv('FRONTEND_URL', '')
+if _frontend and _frontend not in CORS_ALLOWED_ORIGINS:
+    CORS_ALLOWED_ORIGINS.append(_frontend)
+
 CORS_ALLOW_CREDENTIALS = True
+
 CSRF_TRUSTED_ORIGINS = [
-    "https://lapsystem.vercel.app",
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'https://lap-phi.vercel.app',
+    'https://lapsystem.vercel.app',
+    'https://lap-b9vi.onrender.com',
 ]
 
-
-
-
+# ── REST FRAMEWORK ───────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -130,6 +135,7 @@ REST_FRAMEWORK = {
     ),
 }
 
+# ── JWT ──────────────────────────────────────────────────────────
 from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
@@ -138,5 +144,3 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
-
-AUTH_USER_MODEL = 'accounts.User'
