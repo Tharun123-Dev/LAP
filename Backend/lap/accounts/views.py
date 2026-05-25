@@ -84,5 +84,3 @@ class ChangePasswordView(APIView):
         request.user.set_password(new)
         request.user.save()
         return Response({'message':'Password changed successfully'})
-
-

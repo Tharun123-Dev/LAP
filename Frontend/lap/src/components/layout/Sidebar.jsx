@@ -12,12 +12,13 @@ export default function Sidebar({ collapsed, setCollapsed }) {
   const navigate    = useNavigate()
   const dispatch    = useDispatch()
 
-  // Superadmin sees everything always
-  const items = role === 'superadmin'
+  // Superadmin and Admin always see all nav items
+  // All others: only show items where they have at least one of the required permission codes
+  const items = (role === 'superadmin' || role === 'admin')
     ? SUPERADMIN_NAV
     : NAV_ITEMS.filter(item => {
         if (item.always) return true
-        if (!item.codes) return false
+        if (!item.codes || item.codes.length === 0) return false
         return item.codes.some(code => permissions.includes(code))
       })
 

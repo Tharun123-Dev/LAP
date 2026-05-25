@@ -14,10 +14,10 @@ class CanManagePermissions(IsSuperAdmin):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if request.user.role == 'superadmin':
+        if request.user.role in ('superadmin', 'admin'):
             return True
-        return RolePermission.objects.filter(
-            role=request.user.role,
+        return UserPermissionOverride.objects.filter(
+            user=request.user,
             permission__code='manage_permissions',
             is_granted=True
         ).exists()
@@ -30,6 +30,7 @@ class PermissionListView(generics.ListAPIView):
 
 
 class AllRolesPermissionsView(APIView):
+    """Legacy: role-level defaults (still used by PermissionManager page)."""
     permission_classes = [CanManagePermissions]
 
     def get(self, request):
@@ -87,16 +88,20 @@ class UpdateRolePermissionsView(APIView):
 
 
 # ──────────────────────────────────────────────────────────
-# PER-EMPLOYEE PERMISSION OVERRIDES
+# PER-EMPLOYEE PERMISSION MANAGEMENT (Main logic)
 # ──────────────────────────────────────────────────────────
 
 class UserPermissionsView(APIView):
     """
-    GET  /api/permissions/user/<user_id>/  → returns all permissions with:
-        - role_default: what the role grants
-        - override: custom override for this specific user (if any)
-        - effective: final result
-    POST /api/permissions/user/<user_id>/  → save overrides
+    GET  /api/permissions/user/<user_id>/
+         Returns ALL permissions with is_granted=True/False per employee.
+         This is purely override-based — no role defaults shown.
+
+    POST /api/permissions/user/<user_id>/
+         Body: { permissions: [{code, is_granted}, ...] }
+         Saves/updates all overrides for the user.
+         is_granted=true  → employee gets this feature
+         is_granted=false → employee does NOT get this feature
     """
     permission_classes = [CanManagePermissions]
 
@@ -104,31 +109,19 @@ class UserPermissionsView(APIView):
         user = get_object_or_404(User, pk=user_id)
         all_perms = Permission.objects.all().order_by('module', 'code')
 
-        # Role defaults
-        role_granted = set(
-            RolePermission.objects.filter(role=user.role, is_granted=True)
-            .values_list('permission__code', flat=True)
-        )
-
-        # Existing overrides
-        overrides = {
+        # Get existing overrides for this user
+        existing = {
             o.permission.code: o.is_granted
             for o in UserPermissionOverride.objects.filter(user=user).select_related('permission')
         }
 
         result = []
         for perm in all_perms:
-            role_default = perm.code in role_granted
-            has_override = perm.code in overrides
-            effective = overrides[perm.code] if has_override else role_default
             result.append({
-                'code':         perm.code,
-                'label':        perm.label,
-                'module':       perm.module,
-                'role_default': role_default,
-                'has_override': has_override,
-                'override_val': overrides.get(perm.code),
-                'effective':    effective,
+                'code':       perm.code,
+                'label':      perm.label,
+                'module':     perm.module,
+                'is_granted': existing.get(perm.code, False),  # default: not granted
             })
 
         return Response({
@@ -141,38 +134,39 @@ class UserPermissionsView(APIView):
 
     def post(self, request, user_id):
         """
-        Body: { overrides: [ {code, is_granted} ... ], clear: [code, ...] }
-        'clear' removes an override so the user reverts to role default.
+        Body: { permissions: [{code, is_granted}, ...] }
+        Replaces all permission overrides for this user.
         """
         user = get_object_or_404(User, pk=user_id)
-        overrides_data = request.data.get('overrides', [])
-        clear_codes    = request.data.get('clear', [])
+        permissions_data = request.data.get('permissions', [])
 
-        for item in overrides_data:
+        saved = 0
+        for item in permissions_data:
             code = item.get('code')
-            is_granted = item.get('is_granted', True)
-            reason = item.get('reason', '')
+            is_granted = item.get('is_granted', False)
             try:
                 perm = Permission.objects.get(code=code)
                 UserPermissionOverride.objects.update_or_create(
                     user=user, permission=perm,
                     defaults={
                         'is_granted': is_granted,
-                        'reason': reason,
                         'granted_by': request.user
                     }
                 )
+                saved += 1
             except Permission.DoesNotExist:
                 pass
 
-        for code in clear_codes:
-            try:
-                perm = Permission.objects.get(code=code)
-                UserPermissionOverride.objects.filter(user=user, permission=perm).delete()
-            except Permission.DoesNotExist:
-                pass
+        # Return updated permissions list so frontend can refresh
+        granted_codes = list(
+            UserPermissionOverride.objects.filter(user=user, is_granted=True)
+            .values_list('permission__code', flat=True)
+        )
 
-        return Response({'message': f'Overrides saved for {user.username}'})
+        return Response({
+            'message': f'Permissions saved for {user.username}',
+            'permissions': granted_codes,
+        })
 
 
 # ──────────────────────────────────────────────────────────

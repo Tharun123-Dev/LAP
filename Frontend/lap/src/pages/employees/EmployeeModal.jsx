@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { createEmployeeApi, updateEmployeeApi, listManagersApi } from '../../api/services/employees'
-import { getPermissionListApi, getCustomRolesApi, getUserPermissionsApi, saveUserPermissionsApi } from '../../api/services/permissions'
+import { getCustomRolesApi, getUserPermissionsApi, saveUserPermissionsApi } from '../../api/services/permissions'
 import { updatePermissions } from '../../store/authSlice'
 import toast from 'react-hot-toast'
 
@@ -28,14 +28,15 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
   const currentUserId = useSelector(s => s.auth.userId)
   const currentRole   = useSelector(s => s.auth.role)
 
-  const [managers,     setManagers]     = useState([])
-  const [customRoles,  setCustomRoles]  = useState([])
-  const [allPerms,     setAllPerms]     = useState([])
-  const [userPerms,    setUserPerms]    = useState(null)
-  const [overrides,    setOverrides]    = useState({})
-  const [activeTab,    setActiveTab]    = useState('info')
-  const [saving,       setSaving]       = useState(false)
-  const [loadingPerms, setLoadingPerms] = useState(false)
+  const [managers,      setManagers]      = useState([])
+  const [customRoles,   setCustomRoles]   = useState([])
+  // permState: { [code]: boolean } — true = granted, false = denied
+  const [permState,     setPermState]     = useState({})
+  // allPerms: [{code, label, module}] from getUserPermissionsApi
+  const [allPerms,      setAllPerms]      = useState([])
+  const [activeTab,     setActiveTab]     = useState('info')
+  const [saving,        setSaving]        = useState(false)
+  const [loadingPerms,  setLoadingPerms]  = useState(false)
 
   const [form, setForm] = useState({
     username: '', email: '', first_name: '', last_name: '',
@@ -46,24 +47,54 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
     phone: '', address: '', manager: '', date_of_birth: '',
   })
 
-  // Build available roles based on who is logged in
-  // superadmin can assign admin, others cannot
   const allRoles = currentRole === 'superadmin'
     ? [...BASE_ROLES, ...SUPERADMIN_ONLY_ROLES]
     : BASE_ROLES
 
-  // When editing, ensure the employee's current role always appears in the list
-  // so the select box never shows blank
   const availableRoles = allRoles.some(r => r.value === (isEdit ? employee?.role : form.role))
     ? allRoles
     : isEdit && employee?.role
       ? [...allRoles, { value: employee.role, label: employee.role.charAt(0).toUpperCase() + employee.role.slice(1) }]
       : allRoles
 
+  // Load permissions for this employee (when editing)
+  const loadEmployeePerms = (userId) => {
+    setLoadingPerms(true)
+    getUserPermissionsApi(userId)
+      .then(r => {
+        setAllPerms(r.data.permissions)
+        // Build permState from is_granted
+        const state = {}
+        r.data.permissions.forEach(p => {
+          state[p.code] = p.is_granted
+        })
+        setPermState(state)
+      })
+      .catch(() => toast.error('Failed to load permissions'))
+      .finally(() => setLoadingPerms(false))
+  }
+
+  // For new employee: load all permissions (defaulting all to false)
+  const loadAllPermsForNew = () => {
+    setLoadingPerms(true)
+    // Use a dummy fetch — we'll use the permissions list endpoint
+    import('../../api/services/permissions').then(({ getPermissionListApi }) => {
+      getPermissionListApi()
+        .then(r => {
+          const perms = r.data
+          setAllPerms(perms)
+          const state = {}
+          perms.forEach(p => { state[p.code] = false })
+          setPermState(state)
+        })
+        .catch(() => {})
+        .finally(() => setLoadingPerms(false))
+    })
+  }
+
   useEffect(() => {
     listManagersApi().then(r => setManagers(r.data)).catch(() => {})
     getCustomRolesApi().then(r => setCustomRoles(r.data)).catch(() => {})
-    getPermissionListApi().then(r => setAllPerms(r.data)).catch(() => {})
 
     if (isEdit) {
       setForm({
@@ -84,36 +115,38 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
         manager:       employee.manager       || '',
         date_of_birth: employee.date_of_birth || '',
       })
-
       if (employee.user_id) {
-        setLoadingPerms(true)
-        getUserPermissionsApi(employee.user_id)
-          .then(r => {
-            setUserPerms(r.data)
-            const ov = {}
-            r.data.permissions.forEach(p => {
-              if (p.has_override) ov[p.code] = p.override_val
-            })
-            setOverrides(ov)
-          })
-          .catch(() => {})
-          .finally(() => setLoadingPerms(false))
+        loadEmployeePerms(employee.user_id)
       }
+    } else {
+      loadAllPermsForNew()
     }
   }, [])
 
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }))
 
-  // Role change — updates form.role so select box reflects the new value immediately
-  const handleRoleChange = (newRole) => {
-    setForm(p => ({ ...p, role: newRole }))
+  // Toggle single permission
+  const togglePerm = (code) => {
+    setPermState(prev => ({ ...prev, [code]: !prev[code] }))
   }
 
+  // Select all / deselect all in a module
+  const toggleModule = (moduleCodes, grantAll) => {
+    setPermState(prev => {
+      const next = { ...prev }
+      moduleCodes.forEach(c => { next[c] = grantAll })
+      return next
+    })
+  }
+
+  // Group allPerms by module
   const groupedPerms = allPerms.reduce((acc, p) => {
     if (!acc[p.module]) acc[p.module] = []
     acc[p.module].push(p)
     return acc
   }, {})
+
+  const grantedCount = Object.values(permState).filter(Boolean).length
 
   const handleSubmit = async () => {
     if (!form.first_name || !form.last_name || !form.email) {
@@ -128,14 +161,15 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
 
     setSaving(true)
     try {
-      const overridesList = Object.entries(overrides).map(([code, is_granted]) => ({
+      // Build permissions list from permState
+      const permissionsList = Object.entries(permState).map(([code, is_granted]) => ({
         code, is_granted
       }))
 
       const payload = {
         ...form,
         custom_role: form.custom_role || null,
-        permission_overrides: overridesList,
+        permission_overrides: permissionsList,
       }
       if (!payload.department)    delete payload.department
       if (!payload.manager)       delete payload.manager
@@ -145,28 +179,25 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
       if (isEdit) {
         await updateEmployeeApi(employee.id, payload)
 
+        // Always save permissions when editing
         if (employee.user_id) {
-          await saveUserPermissionsApi(employee.user_id, {
-            overrides: Object.entries(overrides).map(([code, val]) => ({ code, is_granted: val })),
-            clear: [],
-          })
+          const saveRes = await saveUserPermissionsApi(employee.user_id, permissionsList)
 
-          // If editing the currently logged-in user → update sidebar instantly
+          // If this employee IS the currently logged-in user → update their sidebar instantly
           const isSelf = String(employee.user_id) === String(currentUserId)
-          if (isSelf) {
-            try {
-              const freshRes = await getUserPermissionsApi(employee.user_id)
-              const effectiveCodes = freshRes.data.permissions
-                .filter(p => p.has_override ? p.override_val : p.role_default)
-                .map(p => p.code)
-              dispatch(updatePermissions(effectiveCodes))
-            } catch {}
+          if (isSelf && saveRes.data?.permissions) {
+            dispatch(updatePermissions(saveRes.data.permissions))
           }
         }
 
         toast.success('Employee updated!')
       } else {
-        await createEmployeeApi(payload)
+        // Create employee, then save permissions after getting user_id back
+        const createRes = await createEmployeeApi(payload)
+        const newUserId = createRes.data?.user_id || createRes.data?.id
+        if (newUserId && permissionsList.some(p => p.is_granted)) {
+          await saveUserPermissionsApi(newUserId, permissionsList)
+        }
         toast.success('Employee created!')
       }
 
@@ -185,7 +216,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
   const tabs = [
     { id: 'info',        label: 'Personal Info' },
     { id: 'job',         label: 'Job & Role' },
-    { id: 'permissions', label: '🔐 Permissions' },
+    { id: 'permissions', label: `🔐 Permissions ${grantedCount > 0 ? `(${grantedCount})` : ''}` },
   ]
 
   return (
@@ -267,11 +298,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
               <Section title="Role & Type">
                 <Row>
                   <Field label="Base Role">
-                    <select
-                      value={form.role}
-                      onChange={e => handleRoleChange(e.target.value)}
-                      style={inp}
-                    >
+                    <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))} style={inp}>
                       {availableRoles.map(r => (
                         <option key={r.value} value={r.value}>{r.label}</option>
                       ))}
@@ -306,8 +333,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
                   </Field>
                 </Row>
                 <div style={{ background: '#f0f4ff', border: '1px solid #c7d7fe', borderRadius: '8px', padding: '12px', marginTop: '8px', fontSize: '12px', color: '#3730a3' }}>
-                  <strong>How roles work:</strong> Base Role controls default permissions.
-                  Fine-tune individual permissions in the <strong>Permissions</strong> tab.
+                  <strong>ℹ️ Note:</strong> Base Role is for identification only. All actual access is controlled via the <strong>Permissions tab</strong>.
                 </div>
               </Section>
 
@@ -345,13 +371,32 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
           {/* ── TAB: Permissions ── */}
           {activeTab === 'permissions' && (
             <div>
-              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#92400e' }}>
-                <strong>📌 How this works:</strong> <em>Role Default</em> shows what the base role ({form.role}) normally gets.
-                Use <strong>Grant</strong> to give extra access or <strong>Revoke</strong> to remove access for this employee only.
-                <strong> Reset</strong> reverts to role default.
-                {isEdit
-                  ? ' Changes apply when you click Save Changes.'
-                  : ' These permissions apply when the employee is created.'}
+              {/* Info banner */}
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#1e40af' }}>
+                <strong>🔐 Permission Control:</strong> Check the permissions you want to grant this employee.
+                Only checked permissions will appear in their dashboard sidebar and be accessible.
+                Uncheck to remove access instantly on next login.
+              </div>
+
+              {/* Stats bar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '10px 16px', marginBottom: '16px' }}>
+                <span style={{ fontSize: '13px', color: '#555' }}>
+                  <strong style={{ color: '#16a34a' }}>{grantedCount}</strong> / {allPerms.length} permissions granted
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    onClick={() => setPermState(Object.fromEntries(allPerms.map(p => [p.code, true])))}
+                    style={{ padding: '4px 12px', fontSize: '11px', borderRadius: '6px', border: '1px solid #86efac', background: '#dcfce7', color: '#166534', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Grant All
+                  </button>
+                  <button
+                    onClick={() => setPermState(Object.fromEntries(allPerms.map(p => [p.code, false])))}
+                    style={{ padding: '4px 12px', fontSize: '11px', borderRadius: '6px', border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Revoke All
+                  </button>
+                </div>
               </div>
 
               {loadingPerms ? (
@@ -361,87 +406,69 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
                   No permissions found. Make sure the backend is reachable.
                 </div>
               ) : (
-                Object.entries(groupedPerms).map(([module, perms]) => (
-                  <div key={module} style={{ marginBottom: '20px' }}>
-                    <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                      {module}
-                    </p>
-                    <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
-                      {perms.map((perm, i) => {
-                        const roleDefault = userPerms
-                          ? (userPerms.permissions.find(p => p.code === perm.code)?.role_default ?? false)
-                          : null
-                        const hasOverride = overrides[perm.code] !== undefined
-                        const effective   = hasOverride ? overrides[perm.code] : (roleDefault ?? false)
+                Object.entries(groupedPerms).map(([module, perms]) => {
+                  const moduleGranted = perms.filter(p => permState[p.code]).length
+                  const allGranted    = moduleGranted === perms.length
 
+                  return (
+                    <div key={module} style={{ marginBottom: '16px', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
+                      {/* Module header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 700, color: '#333', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                          {module}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{ fontSize: '11px', color: '#aaa' }}>{moduleGranted}/{perms.length}</span>
+                          <button
+                            onClick={() => toggleModule(perms.map(p => p.code), !allGranted)}
+                            style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '4px', border: '1px solid #e5e7eb', background: allGranted ? '#fee2e2' : '#dcfce7', color: allGranted ? '#991b1b' : '#166534', cursor: 'pointer', fontWeight: 600 }}
+                          >
+                            {allGranted ? 'Revoke All' : 'Grant All'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Permission rows */}
+                      {perms.map((perm, i) => {
+                        const granted = !!permState[perm.code]
                         return (
-                          <div key={perm.code} style={{
-                            display: 'grid', gridTemplateColumns: '1fr 90px 120px',
-                            alignItems: 'center', padding: '10px 14px', gap: '8px',
+                          <label key={perm.code} style={{
+                            display: 'flex', alignItems: 'center', gap: '12px',
+                            padding: '11px 16px', cursor: 'pointer',
                             background: i % 2 === 0 ? '#fff' : '#fafafa',
                             borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
+                            transition: 'background 0.1s',
                           }}>
-                            <div>
+                            {/* Checkbox */}
+                            <input
+                              type="checkbox"
+                              checked={granted}
+                              onChange={() => togglePerm(perm.code)}
+                              style={{ width: 16, height: 16, accentColor: '#1a1a2e', cursor: 'pointer', flexShrink: 0 }}
+                            />
+
+                            {/* Label + code */}
+                            <div style={{ flex: 1 }}>
                               <div style={{ fontSize: '13px', fontWeight: 500, color: '#111' }}>{perm.label}</div>
-                              <div style={{ fontSize: '11px', color: '#aaa' }}>{perm.code}</div>
-                              <div style={{ marginTop: '3px' }}>
-                                <span style={{ fontSize: '10px', color: roleDefault ? '#059669' : '#9ca3af', fontWeight: 500 }}>
-                                  Role default: {roleDefault === null ? '—' : roleDefault ? '✓ Granted' : '✗ Denied'}
-                                </span>
-                              </div>
+                              <div style={{ fontSize: '11px', color: '#aaa', fontFamily: 'monospace' }}>{perm.code}</div>
                             </div>
 
-                            <div style={{ textAlign: 'center' }}>
-                              <span style={{
-                                fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                                background: effective ? '#d1fae5' : '#f3f4f6',
-                                color: effective ? '#065f46' : '#6b7280',
-                                border: `1px solid ${effective ? '#6ee7b7' : '#e5e7eb'}`,
-                                whiteSpace: 'nowrap',
-                              }}>
-                                {hasOverride ? '★ ' : ''}{effective ? 'ALLOWED' : 'DENIED'}
-                              </span>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                              <button
-                                onClick={() => setOverrides(p => ({ ...p, [perm.code]: true }))}
-                                style={{
-                                  padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
-                                  cursor: 'pointer', fontWeight: 600,
-                                  background: overrides[perm.code] === true ? '#d1fae5' : '#f9fafb',
-                                  borderColor: overrides[perm.code] === true ? '#6ee7b7' : '#e5e7eb',
-                                  color: overrides[perm.code] === true ? '#065f46' : '#888',
-                                }}
-                              >Grant</button>
-                              <button
-                                onClick={() => setOverrides(p => ({ ...p, [perm.code]: false }))}
-                                style={{
-                                  padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
-                                  cursor: 'pointer', fontWeight: 600,
-                                  background: overrides[perm.code] === false ? '#fee2e2' : '#f9fafb',
-                                  borderColor: overrides[perm.code] === false ? '#fca5a5' : '#e5e7eb',
-                                  color: overrides[perm.code] === false ? '#991b1b' : '#888',
-                                }}
-                              >Revoke</button>
-                              {hasOverride && (
-                                <button
-                                  onClick={() => setOverrides(p => { const n = { ...p }; delete n[perm.code]; return n })}
-                                  style={{
-                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px',
-                                    border: '1px solid #e5e7eb', cursor: 'pointer',
-                                    background: '#f9fafb', color: '#888', fontWeight: 500,
-                                  }}
-                                  title="Remove override — revert to role default"
-                                >Reset</button>
-                              )}
-                            </div>
-                          </div>
+                            {/* Status badge */}
+                            <span style={{
+                              fontSize: '10px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+                              background: granted ? '#d1fae5' : '#f3f4f6',
+                              color: granted ? '#065f46' : '#9ca3af',
+                              border: `1px solid ${granted ? '#6ee7b7' : '#e5e7eb'}`,
+                              flexShrink: 0,
+                            }}>
+                              {granted ? '✓ GRANTED' : '✗ DENIED'}
+                            </span>
+                          </label>
                         )
                       })}
                     </div>
-                  </div>
-                ))
+                  )
+                })
               )}
             </div>
           )}
@@ -450,9 +477,9 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
         {/* Footer */}
         <div style={{ padding: '16px 24px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f9fafb' }}>
           <div style={{ fontSize: '12px', color: '#888' }}>
-            {Object.keys(overrides).length > 0 && (
-              <span style={{ color: '#f59e0b', fontWeight: 600 }}>
-                ⚠ {Object.keys(overrides).length} permission override{Object.keys(overrides).length > 1 ? 's' : ''} set
+            {grantedCount > 0 && (
+              <span style={{ color: '#059669', fontWeight: 600 }}>
+                ✓ {grantedCount} permission{grantedCount > 1 ? 's' : ''} will be granted
               </span>
             )}
           </div>
