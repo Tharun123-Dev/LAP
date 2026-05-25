@@ -1,5 +1,5 @@
-const BASE = 'http://localhost:8000/api'
-// const BASE = 'https://lap-b9vi.onrender.com/api'
+// const BASE = 'http://localhost:8000/api'
+const BASE = 'https://lap-b9vi.onrender.com/api'
 
 
 const ENDPOINTS = {
