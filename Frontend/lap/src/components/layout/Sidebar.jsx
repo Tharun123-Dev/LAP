@@ -1,15 +1,25 @@
+// src/components/layout/Sidebar.jsx
 import { useSelector, useDispatch } from 'react-redux'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { logout } from '../../store/authSlice'
-import NAV from '../../config/navigation'
+import { NAV_ITEMS, SUPERADMIN_NAV } from '../../config/navigation'
 
 export default function Sidebar({ collapsed, setCollapsed }) {
-  const role     = useSelector((s) => s.auth.role) || 'employee'
-  const user     = useSelector((s) => s.auth.user)
-  const location = useLocation()
-  const navigate = useNavigate()
-  const dispatch = useDispatch()
-  const items    = NAV[role] || []
+  const role        = useSelector((s) => s.auth.role) || 'employee'
+  const user        = useSelector((s) => s.auth.user)
+  const permissions = useSelector((s) => s.auth.permissions) || []
+  const location    = useLocation()
+  const navigate    = useNavigate()
+  const dispatch    = useDispatch()
+
+  // Superadmin sees everything always
+  const items = role === 'superadmin'
+    ? SUPERADMIN_NAV
+    : NAV_ITEMS.filter(item => {
+        if (item.always) return true
+        if (!item.codes) return false
+        return item.codes.some(code => permissions.includes(code))
+      })
 
   const handleLogout = () => {
     dispatch(logout())

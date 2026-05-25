@@ -1,7 +1,8 @@
-// src/pages/employees/EmployeeModal.jsx
 import { useState, useEffect } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 import { createEmployeeApi, updateEmployeeApi, listManagersApi } from '../../api/services/employees'
 import { getPermissionListApi, getCustomRolesApi, getUserPermissionsApi, saveUserPermissionsApi } from '../../api/services/permissions'
+import { updatePermissions } from '../../store/authSlice'
 import toast from 'react-hot-toast'
 
 const DESIGNATIONS = [
@@ -15,13 +16,23 @@ const BASE_ROLES = [
   { value: 'manager',  label: 'Manager' },
 ]
 
+const SUPERADMIN_ONLY_ROLES = [
+  { value: 'admin', label: 'Admin' },
+  { value: 'superadmin', label: 'Super Admin' },
+]
+
 export default function EmployeeModal({ employee, departments, onClose, onSaved }) {
   const isEdit = !!employee
+
+  const dispatch      = useDispatch()
+  const currentUserId = useSelector(s => s.auth.userId)
+  const currentRole   = useSelector(s => s.auth.role)
+
   const [managers,     setManagers]     = useState([])
   const [customRoles,  setCustomRoles]  = useState([])
   const [allPerms,     setAllPerms]     = useState([])
-  const [userPerms,    setUserPerms]    = useState(null)  // for edit mode
-  const [overrides,    setOverrides]    = useState({})   // {code: true/false/null(=use role default)}
+  const [userPerms,    setUserPerms]    = useState(null)
+  const [overrides,    setOverrides]    = useState({})
   const [activeTab,    setActiveTab]    = useState('info')
   const [saving,       setSaving]       = useState(false)
   const [loadingPerms, setLoadingPerms] = useState(false)
@@ -34,6 +45,20 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
     joining_date: new Date().toISOString().split('T')[0],
     phone: '', address: '', manager: '', date_of_birth: '',
   })
+
+  // Build available roles based on who is logged in
+  // superadmin can assign admin, others cannot
+  const allRoles = currentRole === 'superadmin'
+    ? [...BASE_ROLES, ...SUPERADMIN_ONLY_ROLES]
+    : BASE_ROLES
+
+  // When editing, ensure the employee's current role always appears in the list
+  // so the select box never shows blank
+  const availableRoles = allRoles.some(r => r.value === (isEdit ? employee?.role : form.role))
+    ? allRoles
+    : isEdit && employee?.role
+      ? [...allRoles, { value: employee.role, label: employee.role.charAt(0).toUpperCase() + employee.role.slice(1) }]
+      : allRoles
 
   useEffect(() => {
     listManagersApi().then(r => setManagers(r.data)).catch(() => {})
@@ -59,13 +84,12 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
         manager:       employee.manager       || '',
         date_of_birth: employee.date_of_birth || '',
       })
-      // Load per-user permissions if editing
+
       if (employee.user_id) {
         setLoadingPerms(true)
         getUserPermissionsApi(employee.user_id)
           .then(r => {
             setUserPerms(r.data)
-            // Build overrides map from existing data
             const ov = {}
             r.data.permissions.forEach(p => {
               if (p.has_override) ov[p.code] = p.override_val
@@ -80,30 +104,11 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
 
   const set = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }))
 
-  // When role changes, reload effective permissions preview
-  const handleRoleChange = async (newRole) => {
+  // Role change — updates form.role so select box reflects the new value immediately
+  const handleRoleChange = (newRole) => {
     setForm(p => ({ ...p, role: newRole }))
   }
 
-  // Permission override toggle: null=role-default, true=force-grant, false=force-revoke
-  const toggleOverride = (code, currentEffective) => {
-    setOverrides(prev => {
-      const current = prev[code]
-      if (current === undefined) {
-        // No override: toggle to opposite of current effective
-        return { ...prev, [code]: !currentEffective }
-      } else if (current !== currentEffective) {
-        // Override exists and flips it: remove override (revert to role default)
-        const next = { ...prev }
-        delete next[code]
-        return next
-      } else {
-        return { ...prev, [code]: !current }
-      }
-    })
-  }
-
-  // Group permissions by module
   const groupedPerms = allPerms.reduce((acc, p) => {
     if (!acc[p.module]) acc[p.module] = []
     acc[p.module].push(p)
@@ -139,23 +144,32 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
 
       if (isEdit) {
         await updateEmployeeApi(employee.id, payload)
-        // Save permission overrides separately for edit
+
         if (employee.user_id) {
-          const clearCodes  = []
-          const setOverrides_ = []
-          Object.entries(overrides).forEach(([code, val]) => {
-            setOverrides_.push({ code, is_granted: val })
-          })
           await saveUserPermissionsApi(employee.user_id, {
-            overrides: setOverrides_,
-            clear: clearCodes
+            overrides: Object.entries(overrides).map(([code, val]) => ({ code, is_granted: val })),
+            clear: [],
           })
+
+          // If editing the currently logged-in user → update sidebar instantly
+          const isSelf = String(employee.user_id) === String(currentUserId)
+          if (isSelf) {
+            try {
+              const freshRes = await getUserPermissionsApi(employee.user_id)
+              const effectiveCodes = freshRes.data.permissions
+                .filter(p => p.has_override ? p.override_val : p.role_default)
+                .map(p => p.code)
+              dispatch(updatePermissions(effectiveCodes))
+            } catch {}
+          }
         }
+
         toast.success('Employee updated!')
       } else {
         await createEmployeeApi(payload)
         toast.success('Employee created!')
       }
+
       onSaved()
     } catch (err) {
       const errors = err.response?.data
@@ -253,8 +267,14 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
               <Section title="Role & Type">
                 <Row>
                   <Field label="Base Role">
-                    <select value={form.role} onChange={e => handleRoleChange(e.target.value)} style={inp}>
-                      {BASE_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    <select
+                      value={form.role}
+                      onChange={e => handleRoleChange(e.target.value)}
+                      style={inp}
+                    >
+                      {availableRoles.map(r => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Employee Type">
@@ -285,11 +305,9 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
                     </select>
                   </Field>
                 </Row>
-                {/* Role info box */}
                 <div style={{ background: '#f0f4ff', border: '1px solid #c7d7fe', borderRadius: '8px', padding: '12px', marginTop: '8px', fontSize: '12px', color: '#3730a3' }}>
-                  <strong>How roles work:</strong> Base Role controls permissions (Manager can approve leaves, etc.).
-                  Job Title / Custom Role is just the display label shown in notifications and reports.
-                  You can fine-tune individual permissions in the <strong>Permissions</strong> tab.
+                  <strong>How roles work:</strong> Base Role controls default permissions.
+                  Fine-tune individual permissions in the <strong>Permissions</strong> tab.
                 </div>
               </Section>
 
@@ -328,116 +346,102 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
           {activeTab === 'permissions' && (
             <div>
               <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#92400e' }}>
-                <strong>📌 How this works:</strong> The <em>Role Default</em> column shows what the selected base role ({form.role}) normally gets.
-                Use the toggles to <strong>grant extra permissions</strong> (🟢) or <strong>revoke permissions</strong> (🔴) for this specific employee only.
-                Leave as <em>Role Default</em> to not set any override.
+                <strong>📌 How this works:</strong> <em>Role Default</em> shows what the base role ({form.role}) normally gets.
+                Use <strong>Grant</strong> to give extra access or <strong>Revoke</strong> to remove access for this employee only.
+                <strong> Reset</strong> reverts to role default.
+                {isEdit
+                  ? ' Changes apply when you click Save Changes.'
+                  : ' These permissions apply when the employee is created.'}
               </div>
 
               {loadingPerms ? (
                 <div style={{ textAlign: 'center', padding: '40px', color: '#888' }}>Loading permissions...</div>
+              ) : Object.keys(groupedPerms).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: '#aaa', fontSize: '13px' }}>
+                  No permissions found. Make sure the backend is reachable.
+                </div>
               ) : (
-                Object.entries(groupedPerms).map(([module, perms]) => {
-                  // Calculate effective for each permission
-                  return (
-                    <div key={module} style={{ marginBottom: '20px' }}>
-                      <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                        {module}
-                      </p>
-                      <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
-                        {perms.map((perm, i) => {
-                          // Compute role default from userPerms (if editing) or show ?
-                          const roleDefault = userPerms
-                            ? (userPerms.permissions.find(p => p.code === perm.code)?.role_default ?? false)
-                            : null
-                          const hasOverride = overrides[perm.code] !== undefined
-                          const effective   = hasOverride ? overrides[perm.code] : (roleDefault ?? false)
+                Object.entries(groupedPerms).map(([module, perms]) => (
+                  <div key={module} style={{ marginBottom: '20px' }}>
+                    <p style={{ margin: '0 0 8px', fontSize: '11px', fontWeight: 700, color: '#888', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                      {module}
+                    </p>
+                    <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }}>
+                      {perms.map((perm, i) => {
+                        const roleDefault = userPerms
+                          ? (userPerms.permissions.find(p => p.code === perm.code)?.role_default ?? false)
+                          : null
+                        const hasOverride = overrides[perm.code] !== undefined
+                        const effective   = hasOverride ? overrides[perm.code] : (roleDefault ?? false)
 
-                          return (
-                            <div key={perm.code} style={{
-                              display: 'grid', gridTemplateColumns: '1fr 90px 110px 100px',
-                              alignItems: 'center', padding: '10px 14px', gap: '8px',
-                              background: i % 2 === 0 ? '#fff' : '#fafafa',
-                              borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
-                            }}>
-                              {/* Name */}
-                              <div>
-                                <div style={{ fontSize: '13px', fontWeight: 500, color: '#111' }}>{perm.label}</div>
-                                <div style={{ fontSize: '11px', color: '#aaa' }}>{perm.code}</div>
-                              </div>
-
-                              {/* Role Default */}
-                              <div style={{ fontSize: '12px', textAlign: 'center' }}>
-                                {roleDefault === null ? (
-                                  <span style={{ color: '#ccc' }}>—</span>
-                                ) : roleDefault ? (
-                                  <span style={{ color: '#10b981', fontWeight: 600 }}>✓ Yes</span>
-                                ) : (
-                                  <span style={{ color: '#e5e7eb', fontWeight: 600 }}>✗ No</span>
-                                )}
-                              </div>
-
-                              {/* Override control */}
-                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>
-                                <button
-                                  onClick={() => setOverrides(p => {
-                                    const n = { ...p }; n[perm.code] = true; return n
-                                  })}
-                                  style={{
-                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
-                                    cursor: 'pointer', fontWeight: 600,
-                                    background: overrides[perm.code] === true ? '#d1fae5' : '#f9fafb',
-                                    borderColor: overrides[perm.code] === true ? '#6ee7b7' : '#e5e7eb',
-                                    color: overrides[perm.code] === true ? '#065f46' : '#888',
-                                  }}
-                                >
-                                  Grant
-                                </button>
-                                <button
-                                  onClick={() => setOverrides(p => {
-                                    const n = { ...p }; n[perm.code] = false; return n
-                                  })}
-                                  style={{
-                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
-                                    cursor: 'pointer', fontWeight: 600,
-                                    background: overrides[perm.code] === false ? '#fee2e2' : '#f9fafb',
-                                    borderColor: overrides[perm.code] === false ? '#fca5a5' : '#e5e7eb',
-                                    color: overrides[perm.code] === false ? '#991b1b' : '#888',
-                                  }}
-                                >
-                                  Revoke
-                                </button>
-                                {hasOverride && (
-                                  <button
-                                    onClick={() => setOverrides(p => { const n = { ...p }; delete n[perm.code]; return n })}
-                                    style={{
-                                      padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid #e5e7eb',
-                                      cursor: 'pointer', background: '#f9fafb', color: '#888', fontWeight: 500,
-                                    }}
-                                    title="Remove override — revert to role default"
-                                  >
-                                    Reset
-                                  </button>
-                                )}
-                              </div>
-
-                              {/* Effective badge */}
-                              <div style={{ textAlign: 'center' }}>
-                                <span style={{
-                                  fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                                  background: effective ? '#d1fae5' : '#f3f4f6',
-                                  color: effective ? '#065f46' : '#6b7280',
-                                  border: `1px solid ${effective ? '#6ee7b7' : '#e5e7eb'}`,
-                                }}>
-                                  {hasOverride ? '★ ' : ''}{effective ? 'ALLOWED' : 'DENIED'}
+                        return (
+                          <div key={perm.code} style={{
+                            display: 'grid', gridTemplateColumns: '1fr 90px 120px',
+                            alignItems: 'center', padding: '10px 14px', gap: '8px',
+                            background: i % 2 === 0 ? '#fff' : '#fafafa',
+                            borderTop: i > 0 ? '1px solid #f3f4f6' : 'none',
+                          }}>
+                            <div>
+                              <div style={{ fontSize: '13px', fontWeight: 500, color: '#111' }}>{perm.label}</div>
+                              <div style={{ fontSize: '11px', color: '#aaa' }}>{perm.code}</div>
+                              <div style={{ marginTop: '3px' }}>
+                                <span style={{ fontSize: '10px', color: roleDefault ? '#059669' : '#9ca3af', fontWeight: 500 }}>
+                                  Role default: {roleDefault === null ? '—' : roleDefault ? '✓ Granted' : '✗ Denied'}
                                 </span>
                               </div>
                             </div>
-                          )
-                        })}
-                      </div>
+
+                            <div style={{ textAlign: 'center' }}>
+                              <span style={{
+                                fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+                                background: effective ? '#d1fae5' : '#f3f4f6',
+                                color: effective ? '#065f46' : '#6b7280',
+                                border: `1px solid ${effective ? '#6ee7b7' : '#e5e7eb'}`,
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {hasOverride ? '★ ' : ''}{effective ? 'ALLOWED' : 'DENIED'}
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={() => setOverrides(p => ({ ...p, [perm.code]: true }))}
+                                style={{
+                                  padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
+                                  cursor: 'pointer', fontWeight: 600,
+                                  background: overrides[perm.code] === true ? '#d1fae5' : '#f9fafb',
+                                  borderColor: overrides[perm.code] === true ? '#6ee7b7' : '#e5e7eb',
+                                  color: overrides[perm.code] === true ? '#065f46' : '#888',
+                                }}
+                              >Grant</button>
+                              <button
+                                onClick={() => setOverrides(p => ({ ...p, [perm.code]: false }))}
+                                style={{
+                                  padding: '3px 8px', fontSize: '11px', borderRadius: '5px', border: '1px solid',
+                                  cursor: 'pointer', fontWeight: 600,
+                                  background: overrides[perm.code] === false ? '#fee2e2' : '#f9fafb',
+                                  borderColor: overrides[perm.code] === false ? '#fca5a5' : '#e5e7eb',
+                                  color: overrides[perm.code] === false ? '#991b1b' : '#888',
+                                }}
+                              >Revoke</button>
+                              {hasOverride && (
+                                <button
+                                  onClick={() => setOverrides(p => { const n = { ...p }; delete n[perm.code]; return n })}
+                                  style={{
+                                    padding: '3px 8px', fontSize: '11px', borderRadius: '5px',
+                                    border: '1px solid #e5e7eb', cursor: 'pointer',
+                                    background: '#f9fafb', color: '#888', fontWeight: 500,
+                                  }}
+                                  title="Remove override — revert to role default"
+                                >Reset</button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  )
-                })
+                  </div>
+                ))
               )}
             </div>
           )}

@@ -1,3 +1,4 @@
+// src/store/authSlice.js
 import { createSlice } from '@reduxjs/toolkit'
 import { jwtDecode } from 'jwt-decode'
 
@@ -7,39 +8,57 @@ const decodePermissions = (token) => {
   catch { return [] }
 }
 
+const decodeUserId = (token) => {
+  if (!token) return null
+  try { return jwtDecode(token).user_id || null }
+  catch { return null }
+}
+
 const access = localStorage.getItem('access')
 
 const authSlice = createSlice({
   name: 'auth',
   initialState: {
-    user:         localStorage.getItem('name') || null,
-    role:         localStorage.getItem('role') || null,
+    user:         localStorage.getItem('name')          || null,
+    role:         localStorage.getItem('role')          || null,
+    userId:       localStorage.getItem('user_id')       || decodeUserId(access),
     employeeType: localStorage.getItem('employee_type') || null,
     access:       access || null,
-    refresh:      localStorage.getItem('refresh') || null,
+    refresh:      localStorage.getItem('refresh')       || null,
     permissions:  decodePermissions(access),
   },
   reducers: {
     setCredentials: (state, { payload }) => {
+      const userId = payload.user_id || decodeUserId(payload.access) || null
       state.access       = payload.access
       state.refresh      = payload.refresh
       state.role         = payload.role
       state.user         = payload.name
+      state.userId       = userId
       state.employeeType = payload.employee_type
       state.permissions  = payload.permissions || []
       localStorage.setItem('access',        payload.access)
       localStorage.setItem('refresh',       payload.refresh)
       localStorage.setItem('role',          payload.role)
       localStorage.setItem('name',          payload.name)
+      localStorage.setItem('user_id',       userId || '')
       localStorage.setItem('employee_type', payload.employee_type || '')
     },
+
+    // ✅ KEY ACTION: Call this after saving permissions for any user
+    // If the edited employee IS the currently logged-in user,
+    // their sidebar updates instantly without re-login
+    updatePermissions: (state, { payload }) => {
+      state.permissions = payload  // payload = string[] of permission codes
+    },
+
     logout: (state) => {
-      state.user = state.role = state.access = state.refresh = state.employeeType = null
+      state.user = state.role = state.access = state.refresh = state.employeeType = state.userId = null
       state.permissions = []
       localStorage.clear()
     },
   },
 })
 
-export const { setCredentials, logout } = authSlice.actions
+export const { setCredentials, updatePermissions, logout } = authSlice.actions
 export default authSlice.reducer

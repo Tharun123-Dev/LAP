@@ -30,6 +30,7 @@ class User(AbstractUser):
     BASE_ROLES = [
         ('superadmin', 'SuperAdmin'),
         ('admin',      'Admin'),
+        ('admin', 'Admin'),
         ('manager',    'Manager'),
         ('hr',         'HR'),
         ('employee',   'Employee'),

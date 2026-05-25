@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { useLocation, useNavigate } from 'react-router-dom'
-import NAV from '../../config/navigation'
+import { NAV_ITEMS, SUPERADMIN_NAV } from '../../config/navigation'
 import notificationsService from '../../api/services/notifications'
 
 const TYPE_ICONS = {
@@ -21,21 +21,28 @@ function timeAgo(dateStr) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-const getPageTitle = (role, pathname) => {
-  const items = NAV[role] || []
-  const match = items.find(i =>
-    pathname === '/dashboard' ? i.path === '/dashboard'
+const getPageTitle = (role, permissions, pathname) => {
+  // Use full nav for superadmin, permission-filtered nav for others
+  const allItems = role === 'superadmin'
+    ? SUPERADMIN_NAV
+    : NAV_ITEMS.filter(item =>
+        item.always || (item.codes && item.codes.some(code => permissions.includes(code)))
+      )
+  const match = allItems.find(i =>
+    pathname === '/dashboard'
+      ? i.path === '/dashboard'
       : pathname.startsWith(i.path) && i.path !== '/dashboard'
   )
   return match?.label || 'Dashboard'
 }
 
 export default function Topbar() {
-  const role = useSelector(s => s.auth.role) || 'employee'
-  const user = useSelector(s => s.auth.user)
+  const role        = useSelector(s => s.auth.role) || 'employee'
+  const user        = useSelector(s => s.auth.user)
+  const permissions = useSelector(s => s.auth.permissions) || []
   const { pathname } = useLocation()
-  const navigate = useNavigate()
-  const title = getPageTitle(role, pathname)
+  const navigate    = useNavigate()
+  const title = getPageTitle(role, permissions, pathname)
   const now   = new Date().toLocaleDateString('en-IN', { weekday:'short', day:'numeric', month:'short', year:'numeric' })
 
   const [notifs, setNotifs] = useState([])
