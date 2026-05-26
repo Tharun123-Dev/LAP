@@ -195,7 +195,10 @@ export default function SystemSettings() {
       />
     )
   }
-
+const HIDDEN_KEYS = [
+  'work_days_per_week',
+  'regularization_window_days',
+]
   const renderSetting = (setting) => {
     const isChanged = edits[setting.key] !== undefined
     const impacts   = KEY_IMPACT[setting.key] || []
@@ -331,7 +334,9 @@ export default function SystemSettings() {
 
             {isOpen && (
               <div style={{ padding: '12px 14px 4px' }}>
-                {items.map(s => renderSetting(s))}
+                {items
+  .filter(s => !HIDDEN_KEYS.includes(s.key))
+  .map(s => renderSetting(s))}
               </div>
             )}
           </div>

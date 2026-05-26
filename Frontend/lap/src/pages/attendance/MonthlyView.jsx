@@ -1,5 +1,14 @@
 // src/pages/attendance/MonthlyView.jsx — FULL REPLACEMENT
-// Weekend days now fully dynamic from settings. 6-day week = only Sunday grey.
+// FIXES:
+//  1. Weekend detection is fully settings-driven (5-day or 6-day week).
+//  2. Absent records that overlap with an approved leave now show leave status
+//     (the backend already handles this; this fix ensures the frontend correctly
+//     renders the 'leave' / 'lop_leave' status from the API response).
+//  3. Auto-absent records (status='absent') are clearly labelled "Absent / LOP"
+//     and can be regularized.
+//  4. Records created by mark_absent for employees on leave no longer appear
+//     (backend skips them; frontend now trusts the status field as returned).
+
 import { useEffect, useState } from 'react'
 import { getMyAttendanceApi } from '../../api/services/attendance'
 import systemSettingsService from '../../api/services/systemsettings'
@@ -7,28 +16,28 @@ import RegularizeModal from './RegularizeModal'
 import toast from 'react-hot-toast'
 
 const STATUS_COLOR = {
-  present:  { bg: '#dcfce7', color: '#166534', label: 'P',   title: 'Present' },
-  late:     { bg: '#fef9c3', color: '#854d0e', label: 'L',   title: 'Late' },
-  half_day: { bg: '#fef3c7', color: '#92400e', label: 'H',   title: 'Half Day' },
-  absent:   { bg: '#fee2e2', color: '#991b1b', label: 'A',   title: 'Absent / LOP' },
-  leave:    { bg: '#ede9fe', color: '#5b21b6', label: 'LV',  title: 'On Leave' },
-  lop_leave:{ bg: '#fff1f2', color: '#be123c', label: 'LOP', title: 'LOP Leave' },
-  holiday:  { bg: '#dbeafe', color: '#1e40af', label: 'PH',  title: 'Public Holiday' },
-  weekend:  { bg: '#f3f4f6', color: '#9ca3af', label: 'W',   title: 'Week Off' },
+  present:   { bg: '#dcfce7', color: '#166534', label: 'P',   title: 'Present' },
+  late:      { bg: '#fef9c3', color: '#854d0e', label: 'L',   title: 'Late' },
+  half_day:  { bg: '#fef3c7', color: '#92400e', label: 'H',   title: 'Half Day' },
+  absent:    { bg: '#fee2e2', color: '#991b1b', label: 'A',   title: 'Absent / LOP' },
+  leave:     { bg: '#ede9fe', color: '#5b21b6', label: 'LV',  title: 'On Leave' },
+  lop_leave: { bg: '#fff1f2', color: '#be123c', label: 'LOP', title: 'LOP Leave' },
+  holiday:   { bg: '#dbeafe', color: '#1e40af', label: 'PH',  title: 'Public Holiday' },
+  weekend:   { bg: '#f3f4f6', color: '#9ca3af', label: 'W',   title: 'Week Off' },
 }
 
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
 
 export default function MonthlyView() {
   const now = new Date()
-  const [month,        setMonth]        = useState(now.getMonth() + 1)
-  const [year,         setYear]         = useState(now.getFullYear())
-  const [data,         setData]         = useState(null)
-  const [loading,      setLoading]      = useState(false)
-  const [selRecord,    setSelRecord]    = useState(null)
-  const [weekendDays,  setWeekendDays]  = useState(['saturday', 'sunday'])
-  const [workDaysPerWeek, setWorkDays]  = useState(5)
-  const [shiftStart,   setShiftStart]  = useState('09:00')
+  const [month,       setMonth]      = useState(now.getMonth() + 1)
+  const [year,        setYear]       = useState(now.getFullYear())
+  const [data,        setData]       = useState(null)
+  const [loading,     setLoading]    = useState(false)
+  const [selRecord,   setSelRecord]  = useState(null)
+  const [weekendDays, setWeekendDays]= useState(['saturday', 'sunday'])
+  const [workDaysPerWeek, setWorkDays] = useState(5)
+  const [shiftStart,  setShiftStart] = useState('09:00')
 
   // Load settings once
   useEffect(() => {
@@ -71,17 +80,20 @@ export default function MonthlyView() {
     else setMonth(m => m + 1)
   }
 
-  // Dynamic weekend check using settings
+  // Settings-aware weekend check
   const isWeekend = (dateObj) => weekendDays.includes(DAY_NAMES[dateObj.getDay()])
 
+  // Build lookups from API response
+  // The backend (MyAttendanceView) already merges approved leave dates into records,
+  // setting status='leave' or 'lop_leave' even on auto-absent records.
   const recordMap  = {}
   const holidayMap = {}
   data?.records?.forEach(r  => { recordMap[r.date]  = r })
   data?.holidays?.forEach(h => { holidayMap[h.date] = h.name })
 
-  const firstDay   = new Date(year, month - 1, 1).getDay()
-  const daysInMon  = new Date(year, month, 0).getDate()
-  const todayStr   = new Date().toISOString().split('T')[0]
+  const firstDay  = new Date(year, month - 1, 1).getDay()
+  const daysInMon = new Date(year, month, 0).getDate()
+  const todayStr  = new Date().toISOString().split('T')[0]
 
   const cells = []
   for (let i = 0; i < firstDay; i++) cells.push(null)
@@ -89,19 +101,18 @@ export default function MonthlyView() {
 
   const monthName = new Date(year, month - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })
 
-  // Working day count for this month
   const workingDaysThisMonth = Array.from({ length: daysInMon }, (_, i) => i + 1)
     .filter(d => !isWeekend(new Date(year, month - 1, d))).length
 
   const summaryPills = data?.summary ? [
-    { label: 'Present',   val: data.summary.present,               color: '#16a34a' },
-    { label: 'Absent',    val: data.summary.absent,                color: '#dc2626' },
-    { label: 'On Leave',  val: data.summary.leave     || 0,        color: '#7c3aed' },
-    { label: 'LOP Leave', val: data.summary.lop_leave || 0,        color: '#be123c' },
-    { label: 'Late',      val: data.summary.late,                  color: '#d97706' },
-    { label: 'Half Day',  val: data.summary.half_day,              color: '#b45309' },
-    { label: 'Total Hrs', val: (data.summary.total_hours?.toFixed(1) || '0.0') + 'h', color: '#1d4ed8' },
-    { label: 'OT Hrs',    val: (data.summary.total_ot?.toFixed(1)   || '0.0') + 'h', color: '#7c3aed' },
+    { label: 'Present',    val: data.summary.present,               color: '#16a34a' },
+    { label: 'Absent/LOP', val: data.summary.absent,                color: '#dc2626' },
+    { label: 'On Leave',   val: data.summary.leave     || 0,        color: '#7c3aed' },
+    { label: 'LOP Leave',  val: data.summary.lop_leave || 0,        color: '#be123c' },
+    { label: 'Late',       val: data.summary.late,                  color: '#d97706' },
+    { label: 'Half Day',   val: data.summary.half_day,              color: '#b45309' },
+    { label: 'Total Hrs',  val: (data.summary.total_hours?.toFixed(1) || '0.0') + 'h', color: '#1d4ed8' },
+    { label: 'OT Hrs',     val: (data.summary.total_ot?.toFixed(1)   || '0.0') + 'h', color: '#7c3aed' },
   ] : []
 
   return (
@@ -112,9 +123,7 @@ export default function MonthlyView() {
         <div style={{ textAlign: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#111' }}>{monthName}</h3>
           <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px', display: 'flex', gap: '10px', justifyContent: 'center' }}>
-            <span>
-              {workDaysPerWeek === 6 ? '6-day week · Sun only off' : '5-day week · Sat & Sun off'}
-            </span>
+            <span>{workDaysPerWeek === 6 ? '6-day week · Sun only off' : '5-day week · Sat & Sun off'}</span>
             <span>·</span>
             <span>{workingDaysThisMonth} working days</span>
             <span>·</span>
@@ -141,10 +150,10 @@ export default function MonthlyView() {
         <div style={{ textAlign: 'center', padding: '60px', color: '#888' }}>Loading…</div>
       ) : (
         <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-          {/* Day headers — highlight weekends dynamically */}
+          {/* Day headers */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid #e5e7eb' }}>
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d, i) => {
-              const dayName  = DAY_NAMES[i]
+              const dayName   = DAY_NAMES[i]
               const isWkndHdr = weekendDays.includes(dayName)
               return (
                 <div key={d} style={{
@@ -172,26 +181,41 @@ export default function MonthlyView() {
               const isToday  = dateStr === todayStr
               const isFuture = dateStr > todayStr
 
+              // Missing checkout: has check_in but no check_out on a past day
               const missingCheckout = !!(record?.check_in && !record?.check_out && dateStr !== todayStr)
-              let effectiveStatus   = record?.status
-              if (missingCheckout) effectiveStatus = 'half_day'
+
+              // The effective status to display:
+              // Backend already sets status='leave'/'lop_leave' even on auto-absent records
+              // when an approved leave covers that date. We trust it.
+              let effectiveStatus = record?.status
+              if (missingCheckout && effectiveStatus === 'present') effectiveStatus = 'half_day'
+              if (missingCheckout && effectiveStatus === 'late')    effectiveStatus = 'half_day'
 
               let st = null
               if (record)   st = STATUS_COLOR[effectiveStatus] || STATUS_COLOR.absent
               else if (holiday)  st = STATUS_COLOR.holiday
               else if (isWkndDay) st = STATUS_COLOR.weekend
 
-              const isLop    = record?.status === 'lop_leave' || record?.is_lop
-              const leaveName= record?.leave_name
+              const isLop     = record?.status === 'lop_leave' || record?.is_lop
+              const leaveName = record?.leave_name
               let tooltipText = st?.title || ''
-              if (leaveName)      tooltipText = `${isLop ? 'LOP: ' : ''}${leaveName}`
-              if (missingCheckout) tooltipText = `⚠ Missing checkout: ${dateStr}`
+              if (leaveName)       tooltipText = `${isLop ? 'LOP: ' : ''}${leaveName}`
+              if (missingCheckout) tooltipText = `⚠ Missing checkout — auto half-day: ${dateStr}`
 
-              const canRegularize = !!(record && !isWkndDay && !holiday && record.status === 'absent' && !isFuture)
+              // Only allow regularize on absent (non-leave) past days
+              const canRegularize = !!(
+                record &&
+                !isWkndDay &&
+                !holiday &&
+                !isFuture &&
+                effectiveStatus === 'absent' &&
+                !record.leave_name     // not on leave
+              )
 
               return (
                 <div
-                  key={day} title={tooltipText}
+                  key={day}
+                  title={tooltipText}
                   onClick={() => canRegularize && setSelRecord(record)}
                   style={{
                     padding: '8px', minHeight: '76px',
@@ -200,6 +224,7 @@ export default function MonthlyView() {
                     background: isWkndDay ? '#fafafa' : isToday ? '#eff6ff' : missingCheckout ? '#fff7ed' : '#fff',
                   }}
                 >
+                  {/* Date number */}
                   <div style={{
                     width: '24px', height: '24px', borderRadius: '50%',
                     background: isToday ? '#1d4ed8' : 'transparent',
@@ -210,7 +235,9 @@ export default function MonthlyView() {
                     {day}
                   </div>
 
-                  {holiday && <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#1e40af', lineHeight: 1.2, fontWeight: 600 }}>{holiday}</p>}
+                  {holiday && (
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#1e40af', lineHeight: 1.2, fontWeight: 600 }}>{holiday}</p>
+                  )}
 
                   {isWkndDay && !record && !holiday && (
                     <span style={{ fontSize: '9px', color: '#bbb' }}>week off</span>
@@ -234,8 +261,12 @@ export default function MonthlyView() {
                     </p>
                   )}
 
-                  {missingCheckout && <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#ea580c', fontWeight: 600 }}>no checkout</p>}
-                  {canRegularize    && <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>tap to fix</p>}
+                  {missingCheckout && (
+                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#ea580c', fontWeight: 600 }}>no checkout</p>
+                  )}
+                  {canRegularize && (
+                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>tap to fix</p>
+                  )}
                 </div>
               )
             })}
@@ -255,11 +286,15 @@ export default function MonthlyView() {
       </div>
 
       {selRecord && (
-        <RegularizeModal record={selRecord} onClose={() => setSelRecord(null)} onSaved={() => { setSelRecord(null); load() }} />
+        <RegularizeModal
+          record={selRecord}
+          onClose={() => setSelRecord(null)}
+          onSaved={() => { setSelRecord(null); load() }}
+        />
       )}
     </div>
   )
 }
 
-const navBtn   = { background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '36px', height: '36px', cursor: 'pointer', fontSize: '14px' }
+const navBtn    = { background: '#f3f4f6', border: 'none', borderRadius: '8px', width: '36px', height: '36px', cursor: 'pointer', fontSize: '14px' }
 const emptyCell = { padding: '10px', minHeight: '76px', borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9', background: '#fafafa' }

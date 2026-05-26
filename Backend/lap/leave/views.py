@@ -12,7 +12,7 @@ from .serializers import LeaveTypeSerializer, LeaveBalanceSerializer, LeaveReque
 from .utils import (
     count_working_days, get_or_create_balance,
     init_balances_for_employee, process_carry_forward,
-    get_leave_balance_summary,
+    get_leave_balance_summary, sync_balances_for_leave_type,
 )
 
 
@@ -29,6 +29,23 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
             return [IsAuthenticatedUser()]
         return [make_permission('configure_leave')()]
 
+    def perform_create(self, serializer):
+        """After creating a new leave type, auto-create balance rows for all employees."""
+        leave_type = serializer.save()
+        year       = date.today().year
+        result     = sync_balances_for_leave_type(leave_type, year)
+        # Store sync result so create() can include it in the response
+        self._sync_result = result
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        resp_data = dict(serializer.data)
+        resp_data['balance_sync'] = getattr(self, '_sync_result', {})
+        return Response(resp_data, status=status.HTTP_201_CREATED, headers=headers)
+
 
 class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset         = LeaveType.objects.all()
@@ -39,6 +56,31 @@ class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
             return [IsAuthenticatedUser()]
         return [make_permission('configure_leave')()]
 
+    def perform_update(self, serializer):
+        """
+        After updating a leave type, if days_allowed changed → sync all
+        existing LeaveBalance rows so totals reflect the new allocation.
+        """
+        old_days = self.get_object().days_allowed
+        leave_type = serializer.save()
+        if leave_type.days_allowed != old_days:
+            year   = date.today().year
+            result = sync_balances_for_leave_type(leave_type, year)
+            self._sync_result = result
+        else:
+            self._sync_result = None
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        resp_data = dict(serializer.data)
+        if self._sync_result:
+            resp_data['balance_sync'] = self._sync_result
+        return Response(resp_data)
+
 
 # ── LEAVE BALANCE ─────────────────────────────────────────────────────────────
 
@@ -48,12 +90,15 @@ class MyLeaveBalanceView(APIView):
     def get(self, request):
         year = int(request.query_params.get('year', date.today().year))
 
-        # Auto-init if no balances
+        # Auto-init if no balances exist yet for this year
         count = LeaveBalance.objects.filter(employee=request.user, year=year).count()
         if count == 0:
             init_balances_for_employee(request.user, year)
+        else:
+            # Always ensure new leave types that were added after employee
+            # onboarding have balance rows created automatically.
+            init_balances_for_employee(request.user, year)
 
-        # Use detailed summary (includes carry-forward breakdown)
         summary = get_leave_balance_summary(request.user, year)
         return Response(summary)
 
@@ -74,6 +119,36 @@ class InitBalanceView(APIView):
 
         count = init_balances_for_employee(emp, year)
         return Response({'message': f'{count} balances initialised for {emp.username}'})
+
+
+class SyncLeaveBalancesView(APIView):
+    """
+    POST /api/leave/sync-balances/
+    Body: { "leave_type_id": 3, "year": 2025 }   ← optional year (defaults current)
+
+    Manually trigger a balance sync for a specific leave type across all employees.
+    Useful after bulk changes or for backfilling a previous year.
+    Admin/HR only.
+    """
+    permission_classes = [make_permission('configure_leave')]
+
+    def post(self, request):
+        lt_id = request.data.get('leave_type_id')
+        year  = int(request.data.get('year', date.today().year))
+
+        if not lt_id:
+            return Response({'error': 'leave_type_id is required'}, status=400)
+
+        try:
+            lt = LeaveType.objects.get(pk=lt_id)
+        except LeaveType.DoesNotExist:
+            return Response({'error': 'Leave type not found'}, status=404)
+
+        result = sync_balances_for_leave_type(lt, year)
+        return Response({
+            'message': f'Balance sync complete for {lt.name} ({year})',
+            **result,
+        })
 
 
 class CarryForwardView(APIView):
@@ -126,11 +201,8 @@ class ApplyLeaveView(APIView):
         except LeaveType.DoesNotExist:
             return Response({'error': 'Leave type not found'}, status=404)
 
-        # Notice period check — reads SystemSetting first, falls back to LeaveType.min_notice_days
-        from attendance.settings_helper import (
-            get_leave_advance_notice_days,
-            get_leave_days_allowed,
-        )
+        # Notice period check
+        from attendance.settings_helper import get_leave_advance_notice_days
         system_notice = get_leave_advance_notice_days(lt.code)
         effective_notice = system_notice if system_notice > 0 else lt.min_notice_days
         if effective_notice > 0:
@@ -141,10 +213,8 @@ class ApplyLeaveView(APIView):
                              f'Please apply at least {effective_notice} working day(s) before the leave date.'
                 }, status=400)
 
-        # Calculate days using settings-aware count
         days = count_working_days(start, end, session)
 
-        # Balance check — use current year
         year    = date.today().year
         balance = get_or_create_balance(request.user, lt, year)
 
@@ -278,9 +348,6 @@ class AllLeaveRequestsView(APIView):
             'employee', 'employee__profile', 'leave_type', 'approved_by'
         ).all()
 
-        # KEY FIX: exclude the logged-in user's OWN requests from the approval queue.
-        # If HR applies leave, it must NOT appear in HR's approval list —
-        # only in manager/admin/higher-level approver's queue.
         qs = qs.exclude(employee=request.user)
 
         if status_filter:
@@ -289,6 +356,7 @@ class AllLeaveRequestsView(APIView):
             qs = qs.filter(employee_id=emp_id)
 
         return Response(LeaveRequestSerializer(qs, many=True).data)
+
 
 # ── APPROVE / REJECT ──────────────────────────────────────────────────────────
 
@@ -337,8 +405,8 @@ class LeaveActionView(APIView):
             from attendance.models import AttendanceRecord
             from attendance.settings_helper import is_weekend as _is_wknd
 
-            is_unpaid = (not leave.leave_type.is_paid) or (leave.leave_type.code == 'LOP')
-            is_half   = leave.session in ('first_half', 'second_half')
+            is_unpaid  = (not leave.leave_type.is_paid) or (leave.leave_type.code == 'LOP')
+            is_half    = leave.session in ('first_half', 'second_half')
             att_status = 'half_day' if is_half else ('absent' if is_unpaid else 'leave')
 
             cur = leave.start_date
@@ -427,7 +495,6 @@ class LeavePriorUsageView(APIView):
             'annual_balance':   annual_balance,
             'has_prior':        total_prior_days > 0,
         })
-
 # ── LEAVE POLICY SETTINGS SYNC ────────────────────────────────────────────────
 
 class LeavePolicySettingsView(APIView):
@@ -524,10 +591,8 @@ class LeavePolicySettingsView(APIView):
         # ── days_allowed ─────────────────────────────────────────────────────
         if 'days_allowed' in fields:
             val = int(fields['days_allowed'])
-            old_days = lt.days_allowed  # capture BEFORE updating
             lt.days_allowed = val
             updated_model_fields.append('days_allowed')
-
             # sync to system setting
             key = f'{code}_days_per_year'
             obj, _ = SystemSetting.objects.get_or_create(
@@ -541,26 +606,6 @@ class LeavePolicySettingsView(APIView):
             obj.value = str(val)
             obj.save(update_fields=['value'])
             updated_settings.append(key)
-
-            # ── CRITICAL: update existing LeaveBalance.total for current year ──
-            # So the Balance Dashboard, Apply Leave remaining, and Payroll all
-            # immediately reflect the new allocation without needing to re-init.
-            current_year = date.today().year
-            balances_to_update = LeaveBalance.objects.filter(
-                leave_type=lt,
-                year=current_year,
-            )
-            balance_updated_count = 0
-            for bal in balances_to_update:
-                carried = float(bal.carried or 0)
-                new_total = val + carried           # new base + any carried days
-                expected_old_total = old_days + carried  # what it should have been
-                # Only touch balances that match the expected old total
-                # (avoids overwriting manually adjusted balances)
-                if abs(float(bal.total) - expected_old_total) < 0.1:
-                    bal.total = new_total
-                    bal.save(update_fields=['total'])
-                    balance_updated_count += 1
 
         # ── min_notice_days ───────────────────────────────────────────────────
         if 'min_notice_days' in fields:
@@ -626,13 +671,9 @@ class LeavePolicySettingsView(APIView):
         if updated_model_fields:
             lt.save(update_fields=list(set(updated_model_fields)))
 
-        # Count how many balances were updated (for response info)
-        balances_updated = locals().get('balance_updated_count', 0)
-
         return Response({
-            'message':           f'Saved to both LeaveType and SystemSettings. {balances_updated} employee balance(s) updated for {date.today().year}.',
-            'leave_type_id':     lt.id,
-            'updated_fields':    list(set(updated_model_fields)),
-            'synced_settings':   updated_settings,
-            'balances_updated':  balances_updated,
+            'message':          'Saved to both LeaveType and SystemSettings',
+            'leave_type_id':    lt.id,
+            'updated_fields':   list(set(updated_model_fields)),
+            'synced_settings':  updated_settings,
         })

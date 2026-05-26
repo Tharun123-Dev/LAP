@@ -1,21 +1,67 @@
-// src/pages/payroll/PayslipModal.jsx — FULL REPLACEMENT v3
-// Shows dynamic rates used (PF%, ESI%, OT multiplier), full deduction list,
-// LOP formula, net pay formula — all from entry data
+// src/pages/payroll/PayslipModal.jsx — FULL REPLACEMENT
+// FIX: Shows actual PF/ESI rates derived from entry data (not hardcoded).
+//      Absent days are shown as LOP in payslip breakdown.
+//      All deduction notes match what the payroll engine computed.
 const MONTHS = ['','January','February','March','April','May','June','July','August','September','October','November','December']
 const fmt  = v => `₹${parseFloat(v||0).toLocaleString('en-IN',{minimumFractionDigits:2})}`
 const fmtD = v => parseFloat(v||0).toFixed(1)
 const n    = v => parseFloat(v||0)
 
+// Derive the actual PF % from entry values (avoids hardcoding 12%)
+function derivePfPct(entry) {
+  const basic  = n(entry.basic)
+  const pfEmp  = n(entry.pf_employee)
+  const present = n(entry.present_days)
+  const working = n(entry.working_days)
+  if (basic <= 0 || pfEmp <= 0 || working <= 0) return null
+  // pfEmp = basic * pfPct/100 * (present/working)  → solve for pfPct
+  const ratio = present > 0 ? present / working : 1
+  const pct = (pfEmp / (basic * ratio)) * 100
+  return pct > 0 && pct <= 25 ? pct.toFixed(2) : '12.00'
+}
+
+function deriveEsiPct(entry) {
+  const esiEmp  = n(entry.esi_employee)
+  const gross   = n(entry.gross)
+  const lopDed  = n(entry.lop_deduction)
+  const effectiveGross = gross - lopDed
+  const present = n(entry.present_days)
+  const working = n(entry.working_days)
+  if (esiEmp <= 0) return null
+  if (effectiveGross <= 0 || working <= 0) return null
+  const ratio = present > 0 ? present / working : 1
+  const pct = (esiEmp / (effectiveGross * ratio)) * 100
+  return pct > 0 && pct <= 5 ? pct.toFixed(2) : '0.75'
+}
+
+function deriveOtMultiplier(entry) {
+  const otPay  = n(entry.ot_pay)
+  const otHrs  = n(entry.ot_hours)
+  const basic  = n(entry.basic)
+  const wd     = n(entry.working_days)
+  if (otPay <= 0 || otHrs <= 0 || basic <= 0 || wd <= 0) return '1.50'
+  // otPay = (basic / wd / 8) * multiplier * otHrs → solve for multiplier
+  const hourlyBase = basic / wd / 8
+  const mult = otPay / (hourlyBase * otHrs)
+  return mult > 0 ? mult.toFixed(2) : '1.50'
+}
+
 export default function PayslipModal({ entry, onClose }) {
   const run       = entry.payroll_run && typeof entry.payroll_run === 'object' ? entry.payroll_run : {}
   const monthName = run.month ? `${MONTHS[run.month]} ${run.year}` : 'Payslip'
-  const hasLOP = n(entry.lop_days) > 0
-  const hasOT  = n(entry.ot_hours) > 0
-  const hasAdj = entry.adjustments?.length > 0
+  const hasLOP    = n(entry.lop_days) > 0
+  const hasOT     = n(entry.ot_hours) > 0
+  const hasAdj    = entry.adjustments?.length > 0
 
-  // Dynamic rate display (computed from entry values)
-  const pfPct  = n(entry.basic) > 0 ? ((n(entry.pf_employee) / n(entry.basic)) * 100 * (n(entry.working_days) / Math.max(n(entry.present_days),1))).toFixed(1) : '12.0'
-  const grossForESI = n(entry.gross) - n(entry.lop_deduction)
+  // Derive actual rates used this payroll run
+  const pfPct       = derivePfPct(entry)
+  const esiPct      = deriveEsiPct(entry)
+  const otMult      = deriveOtMultiplier(entry)
+  const esiExempt   = n(entry.esi_employee) === 0 && n(entry.gross) > 0
+  const esiLabel    = esiExempt ? 'ESI Exempt (gross > threshold)' : `ESI — Employee (${esiPct || '0.75'}% of gross, prorated)`
+  const lopPerDay   = (n(entry.working_days) > 0 && n(entry.gross) > 0)
+    ? (n(entry.gross) - n(entry.ot_pay)) / n(entry.working_days)
+    : 0
 
   const earnings = [
     { label: 'Basic Salary',                                      value: entry.basic },
@@ -25,40 +71,43 @@ export default function PayslipModal({ entry, onClose }) {
     { label: 'Transport Allowance',                               value: entry.transport },
     { label: 'Medical Allowance',                                 value: entry.medical },
     { label: 'Other Allowance',                                   value: entry.other_allowance },
-    { label: `Overtime Pay (${fmtD(entry.ot_hours)} hrs × 1.5×)`,value: entry.ot_pay, accent: '#7c3aed' },
+    { label: `Overtime Pay (${fmtD(entry.ot_hours)} hrs × ${otMult}×)`, value: entry.ot_pay, accent: '#7c3aed' },
   ].filter(e => n(e.value) > 0)
 
   const deductions = [
     {
-      label: `PF — Employee (12% of Basic)`,
-      note: `₹${fmtD(entry.basic)} × 12% × (${fmtD(entry.present_days)}/${entry.working_days} days)`,
+      label: `PF — Employee (${pfPct || '12'}% of Basic)`,
+      note:  `₹${fmtD(entry.basic)} × ${pfPct || '12'}% × (${fmtD(entry.present_days)} / ${entry.working_days} days worked)`,
       value: entry.pf_employee, color: '#7c3aed',
     },
     {
-      label: 'ESI — Employee (0.75% of gross)',
-      note: n(entry.esi_employee) === 0 ? 'ESI exempt (gross > threshold)' : `Prorated by days worked`,
+      label: esiLabel,
+      note:  esiExempt
+        ? 'Gross salary exceeds ESI threshold — no ESI deducted.'
+        : `Prorated by ${fmtD(entry.present_days)} / ${entry.working_days} days worked`,
       value: entry.esi_employee, color: '#2563eb',
+      hide:  esiExempt,
     },
     {
       label: 'Professional Tax (PT)',
-      note: `Prorated by ${fmtD(entry.present_days)} / ${entry.working_days} days`,
+      note:  `Computed on effective gross · prorated by ${fmtD(entry.present_days)} / ${entry.working_days} days`,
       value: entry.pt, color: '#0891b2',
     },
     {
       label: 'Tax Deducted at Source (TDS)',
-      note: 'Based on annual income slab',
+      note:  'Annual income slab calculation (New Tax Regime)',
       value: entry.tds, color: '#dc2626',
     },
     {
       label: `Loss of Pay — ${fmtD(entry.lop_days)} day(s)`,
-      note: `Per-day rate × ${fmtD(entry.lop_days)} LOP days`,
+      note:  `Gross ÷ ${entry.working_days} working days × ${fmtD(entry.lop_days)} LOP days = ${fmt(lopPerDay)}/day × ${fmtD(entry.lop_days)}`,
       value: entry.lop_deduction, color: '#ea580c', isLop: true,
     },
-  ].filter(d => n(d.value) > 0)
+  ].filter(d => n(d.value) > 0 && !d.hide)
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:'16px', overflowY:'auto' }}>
-      <div style={{ background:'#fff', borderRadius:'16px', width:'100%', maxWidth:'760px', overflow:'hidden', fontFamily:'Inter,sans-serif', margin:'auto', boxShadow:'0 25px 80px rgba(0,0,0,0.3)' }}>
+      <div style={{ background:'#fff', borderRadius:'16px', width:'100%', maxWidth:'780px', overflow:'hidden', fontFamily:'Inter,sans-serif', margin:'auto', boxShadow:'0 25px 80px rgba(0,0,0,0.3)' }}>
 
         {/* Header */}
         <div style={{ background:'linear-gradient(135deg,#1a1a2e 0%,#16213e 60%,#0f3460 100%)', padding:'26px 30px' }}>
@@ -78,13 +127,13 @@ export default function PayslipModal({ entry, onClose }) {
         <div style={{ padding:'18px 30px', background:'#f8fafc', borderBottom:'1px solid #e5e7eb' }}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(130px,1fr))', gap:'14px' }}>
             {[
-              { l:'Employee',       v: entry.employee_name || '—' },
-              { l:'Emp Code',       v: entry.emp_code      || '—' },
-              { l:'Department',     v: entry.department    || '—' },
-              { l:'Working Days',   v: `${entry.working_days} days` },
-              { l:'Days Present',   v: `${fmtD(entry.present_days)} days` },
-              { l:'LOP Days',       v: `${fmtD(entry.lop_days)} days`, accent: hasLOP ? '#dc2626' : null },
-              { l:'OT Hours',       v: hasOT ? `${fmtD(entry.ot_hours)} hrs` : '—', accent: hasOT ? '#7c3aed' : null },
+              { l:'Employee',     v: entry.employee_name || '—' },
+              { l:'Emp Code',     v: entry.emp_code      || '—' },
+              { l:'Department',   v: entry.department    || '—' },
+              { l:'Working Days', v: `${entry.working_days} days` },
+              { l:'Days Present', v: `${fmtD(entry.present_days)} days` },
+              { l:'LOP Days',     v: `${fmtD(entry.lop_days)} days`, accent: hasLOP ? '#dc2626' : null },
+              { l:'OT Hours',     v: hasOT ? `${fmtD(entry.ot_hours)} hrs` : '—', accent: hasOT ? '#7c3aed' : null },
             ].map(f => (
               <div key={f.l}>
                 <p style={{ margin:0, fontSize:'10px', color:'#999', textTransform:'uppercase', letterSpacing:'0.04em' }}>{f.l}</p>
@@ -94,28 +143,28 @@ export default function PayslipModal({ entry, onClose }) {
           </div>
         </div>
 
-        {/* Payroll settings used — transparency section */}
+        {/* Actual rates used this payroll */}
         <div style={{ padding:'10px 30px', background:'#f5f3ff', borderBottom:'1px solid #ede9fe' }}>
           <p style={{ margin:'0 0 6px', fontSize:'10px', fontWeight:700, color:'#7c3aed', textTransform:'uppercase', letterSpacing:'0.05em' }}>
-            📐 Calculation Settings Used This Month
+            📐 Rates Applied This Month
           </p>
           <div style={{ display:'flex', gap:'14px', flexWrap:'wrap', fontSize:'11px', color:'#6b21a8' }}>
             <span>Working days: <strong>{entry.working_days}</strong></span>
-            <span>PF: <strong>12% of Basic</strong></span>
-            <span>ESI: <strong>0.75% {n(entry.esi_employee) === 0 ? '(exempt)' : 'of gross'}</strong></span>
-            <span>OT: <strong>1.5× rate</strong></span>
-            {hasLOP && (
-              <span>LOP rate: <strong>{fmt(n(entry.gross) - n(entry.ot_pay) > 0 && entry.working_days > 0 ? (n(entry.gross) - n(entry.ot_pay)) / entry.working_days : 0)}/day</strong></span>
-            )}
+            {pfPct && <span>PF (Employee): <strong>{pfPct}% of Basic</strong></span>}
+            {!esiExempt && esiPct && <span>ESI (Employee): <strong>{esiPct}% of gross</strong></span>}
+            {esiExempt && <span>ESI: <strong>Exempt</strong></span>}
+            {hasOT && <span>OT Multiplier: <strong>{otMult}×</strong></span>}
+            {hasLOP && <span>LOP Rate: <strong>{fmt(lopPerDay)}/day</strong></span>}
           </div>
         </div>
 
-        {/* LOP alert */}
+        {/* LOP alert — absent days converted to LOP */}
         {hasLOP && (
           <div style={{ padding:'11px 30px', background:'#fff7ed', borderBottom:'2px solid #fed7aa', display:'flex', alignItems:'center', gap:'10px' }}>
             <span style={{ fontSize:'18px' }}>⚠️</span>
             <p style={{ margin:0, fontSize:'13px', color:'#9a3412' }}>
-              <strong>{fmtD(entry.lop_days)} Loss-of-Pay day(s).</strong> Deduction: <strong>{fmt(entry.lop_deduction)}</strong> = (Gross ÷ {entry.working_days} working days) × {fmtD(entry.lop_days)} LOP days.
+              <strong>{fmtD(entry.lop_days)} Loss-of-Pay day(s)</strong> (includes absent days and late deductions).
+              Deduction: <strong>{fmt(entry.lop_deduction)}</strong> = (Gross − OT) ÷ {entry.working_days} working days × {fmtD(entry.lop_days)} LOP days.
             </p>
           </div>
         )}
@@ -125,7 +174,8 @@ export default function PayslipModal({ entry, onClose }) {
           <div style={{ padding:'11px 30px', background:'#faf5ff', borderBottom:'2px solid #e9d5ff', display:'flex', alignItems:'center', gap:'10px' }}>
             <span style={{ fontSize:'18px' }}>⏱</span>
             <p style={{ margin:0, fontSize:'13px', color:'#6b21a8' }}>
-              <strong>{fmtD(entry.ot_hours)} OT hour(s)</strong> — OT Pay <strong>{fmt(entry.ot_pay)}</strong> = Basic ÷ ({entry.working_days} days × 8 hrs) × 1.5 × {fmtD(entry.ot_hours)}h
+              <strong>{fmtD(entry.ot_hours)} OT hour(s)</strong> — OT Pay <strong>{fmt(entry.ot_pay)}</strong>
+              = Basic ÷ ({entry.working_days} days × 8 hrs) × {otMult} × {fmtD(entry.ot_hours)}h
             </p>
           </div>
         )}
@@ -195,7 +245,7 @@ export default function PayslipModal({ entry, onClose }) {
           <p style={{ margin:0, fontSize:'12px', color:'#888', textAlign:'center', lineHeight:1.6 }}>
             <strong>Net Pay</strong> = Gross {fmt(entry.gross)}
             {hasLOP && <span style={{ color:'#ea580c' }}> − LOP {fmt(entry.lop_deduction)}</span>}
-            {' − PF '}{fmt(entry.pf_employee)}
+            {n(entry.pf_employee) > 0 && <span>{' − PF '}{fmt(entry.pf_employee)}</span>}
             {n(entry.esi_employee) > 0 && <span>{' − ESI '}{fmt(entry.esi_employee)}</span>}
             {n(entry.pt) > 0 && <span>{' − PT '}{fmt(entry.pt)}</span>}
             {n(entry.tds) > 0 && <span style={{ color:'#dc2626' }}>{' − TDS '}{fmt(entry.tds)}</span>}
