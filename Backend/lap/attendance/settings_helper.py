@@ -20,10 +20,6 @@ def _get(key, default):
 
 
 def _parse_bool(val) -> bool:
-    """
-    Safely coerce any value (bool, 'true', 'false', 'True', 'False', 1, 0, ...)
-    to a Python bool.  Plain bool() incorrectly returns True for 'false'.
-    """
     if isinstance(val, bool):
         return val
     if str(val).lower() in ('false', '0', 'no', 'off'):
@@ -80,17 +76,10 @@ def get_wfh_enabled() -> bool:
 
 
 def get_auto_absent_enabled() -> bool:
-    """
-    Returns True if the system should auto-mark absent employees.
-    FIX: Uses _parse_bool() instead of bool() so that a stored value
-    of 'false' / 'False' / '0' is correctly returned as False —
-    plain bool('false') would wrongly return True.
-    """
     return _parse_bool(_get('auto_absent_enabled', True))
 
 
 def get_weekend_days() -> list:
-    """Returns list like ['saturday','sunday'] or ['sunday']"""
     raw = _get('weekend_days', ['saturday', 'sunday'])
     if isinstance(raw, list):
         return [d.lower() for d in raw]
@@ -107,20 +96,12 @@ def get_work_days_per_week() -> int:
 
 
 def is_weekend(date_obj) -> bool:
-    """
-    Returns True if date_obj falls on a configured weekend day.
-    Uses weekend_days setting — works for both 5-day and 6-day weeks.
-    """
     DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
     day_name = DAY_NAMES[date_obj.weekday()]
     return day_name in get_weekend_days()
 
 
 def get_working_days_in_month(year: int, month: int) -> tuple:
-    """
-    Returns (working_days, total_days_in_month) using weekend_days setting.
-    Replaces hardcoded weekday < 5 logic everywhere.
-    """
     import calendar
     from datetime import date
     _, days_in_month = calendar.monthrange(year, month)
@@ -131,7 +112,27 @@ def get_working_days_in_month(year: int, month: int) -> tuple:
     return working, days_in_month
 
 
-# ── PAYROLL ───────────────────────────────────────────────────────────────────
+# ── PAYROLL — ALL 11 SETTINGS ─────────────────────────────────────────────────
+
+def get_basic_salary_percent() -> Decimal:
+    """Basic = Annual CTC × this% ÷ 12. Default 40."""
+    return Decimal(str(_get('basic_salary_percent', 40)))
+
+
+def get_hra_metro_percent() -> Decimal:
+    """HRA for metro city employees = Basic × this%. Default 50."""
+    return Decimal(str(_get('hra_percent_metro', 50)))
+
+
+def get_hra_nonmetro_percent() -> Decimal:
+    """HRA for non-metro employees = Basic × this%. Default 40."""
+    return Decimal(str(_get('hra_percent_nonmetro', 40)))
+
+
+def get_da_percent() -> Decimal:
+    """DA = Basic × this%. Default 10. Fully dynamic from system settings."""
+    return Decimal(str(_get('da_percent', 10)))
+
 
 def get_pf_employee_percent() -> Decimal:
     """PF employee contribution % of Basic. Default 12."""
@@ -158,16 +159,18 @@ def get_esi_threshold() -> Decimal:
     return Decimal(str(_get('esi_threshold_salary', 21000)))
 
 
+def get_payroll_lock_day() -> int:
+    """Day of month after which payroll run is allowed. Default 25."""
+    return int(_get('payroll_lock_day', 25))
+
+
 def get_tds_flat_contract() -> Decimal:
     """Flat TDS % for contract employees. Default 10."""
     return Decimal(str(_get('tds_flat_percent_contract', 10)))
 
 
 def get_pt_slabs() -> list:
-    """
-    Returns PT slabs as list of dicts: [{'upto': 20000, 'pt': 150}, ...]
-    Sorted ascending by upto. Last entry catches all remaining.
-    """
+    """PT slabs as list of dicts: [{'upto': 20000, 'pt': 150}, ...]"""
     default = [
         {'upto': 15000,     'pt': 0},
         {'upto': 20000,     'pt': 150},
@@ -183,33 +186,14 @@ def get_pt_slabs() -> list:
         return default
 
 
-def get_basic_salary_percent() -> Decimal:
-    return Decimal(str(_get('basic_salary_percent', 40)))
-
-
-def get_hra_metro_percent() -> Decimal:
-    return Decimal(str(_get('hra_percent_metro', 50)))
-
-
-def get_hra_nonmetro_percent() -> Decimal:
-    return Decimal(str(_get('hra_percent_nonmetro', 40)))
-
-
-def get_payroll_lock_day() -> int:
-    return int(_get('payroll_lock_day', 25))
-
-
 # ── LEAVE ─────────────────────────────────────────────────────────────────────
 
 def get_leave_year_basis() -> str:
-    """'calendar' or 'fiscal'"""
     return str(_get('leave_year_basis', 'calendar'))
 
 
 def get_carry_forward_month() -> int:
     return int(_get('carry_forward_month', 1))
-
-
 
 
 def get_half_day_leave_enabled() -> bool:
@@ -243,26 +227,18 @@ def get_probation_months() -> int:
 
 
 def get_cl_advance_notice_days() -> int:
-    """Advance notice days required for Casual Leave — from System Settings."""
     return int(_get('cl_advance_notice_days', 0))
 
 
 def get_sl_advance_notice_days() -> int:
-    """Advance notice days required for Sick Leave — from System Settings."""
     return int(_get('sl_advance_notice_days', 0))
 
 
 def get_el_advance_notice_days() -> int:
-    """Advance notice days required for Earned Leave — from System Settings."""
     return int(_get('el_advance_notice_days', 0))
 
 
 def get_leave_advance_notice_days(leave_code: str) -> int:
-    """
-    Returns the system-settings advance notice days for any leave type code.
-    Reads <code_lower>_advance_notice_days from SystemSetting.
-    Falls back to 0 if no setting found.
-    """
     code = (leave_code or '').upper()
     if code == 'CL':
         return get_cl_advance_notice_days()
@@ -270,7 +246,6 @@ def get_leave_advance_notice_days(leave_code: str) -> int:
         return get_sl_advance_notice_days()
     if code == 'EL':
         return get_el_advance_notice_days()
-    # Generic fallback: try <code_lower>_advance_notice_days
     key = f"{leave_code.lower()}_advance_notice_days"
     val = _get(key, None)
     if val is not None:
@@ -282,11 +257,6 @@ def get_leave_advance_notice_days(leave_code: str) -> int:
 
 
 def get_leave_days_allowed(leave_code: str) -> int:
-    """
-    Returns system-settings days_allowed for any leave type code.
-    Reads <code_lower>_days_per_year from SystemSetting.
-    Returns -1 if no setting found (caller should use LeaveType.days_allowed).
-    """
     code = (leave_code or '').lower()
     key  = f"{code}_days_per_year"
     val  = _get(key, None)
@@ -299,11 +269,6 @@ def get_leave_days_allowed(leave_code: str) -> int:
 
 
 def get_leave_is_paid(leave_code: str) -> int:
-    """
-    Returns system-settings is_paid override for a leave code.
-    Reads <code_lower>_is_paid from SystemSetting.
-    Returns -1 if no setting found (caller uses LeaveType.is_paid).
-    """
     code = (leave_code or '').lower()
     key  = f"{code}_is_paid"
     val  = _get(key, None)
@@ -318,10 +283,6 @@ def get_leave_is_paid(leave_code: str) -> int:
 
 
 def get_leave_carry_forward(leave_code: str) -> int:
-    """
-    Returns system-settings carry_forward override for a leave code.
-    Returns -1 if no setting found.
-    """
     code = (leave_code or '').lower()
     key  = f"{code}_carry_forward"
     val  = _get(key, None)

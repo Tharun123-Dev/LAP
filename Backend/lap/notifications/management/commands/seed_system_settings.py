@@ -2,6 +2,7 @@
 """
 Run: python manage.py seed_system_settings
 Safe to re-run — uses get_or_create so existing values are preserved.
+All payroll settings are dynamic. No hardcoded values anywhere.
 """
 from django.core.management.base import BaseCommand
 from notifications.models import SystemSetting
@@ -12,265 +13,270 @@ SETTINGS = [
     # ═══════════════ ATTENDANCE ═══════════════
     dict(
         key='work_days_per_week', value='5', value_type='integer', category='attendance',
-        label='Work Days Per Week ✓',
+        label='Work Days Per Week',
         description='5 = Mon–Fri (Sat & Sun off). 6 = Mon–Sat (Sun off only).',
     ),
     dict(
         key='weekend_days', value='["saturday","sunday"]', value_type='json', category='attendance',
-        label='Weekend / Week-off Days ✓',
+        label='Weekend / Week-off Days',
         description='JSON list. ["saturday","sunday"] = 5-day week. ["sunday"] = 6-day week.',
     ),
     dict(
         key='work_start_time', value='09:00', value_type='time', category='attendance',
-        label='Shift Start Time ✓',
+        label='Shift Start Time',
         description='Official shift start time (HH:MM). Used for late marking.',
     ),
     dict(
         key='work_end_time', value='18:00', value_type='time', category='attendance',
-        label='Shift End Time ✓',
+        label='Shift End Time',
         description='Official shift end time (HH:MM). Used for OT calculation.',
     ),
     dict(
         key='work_hours_per_day', value='8', value_type='integer', category='attendance',
-        label='Work Hours Per Day ✓',
+        label='Work Hours Per Day',
         description='Standard working hours per day. Affects OT pay rate.',
     ),
     dict(
         key='grace_period_minutes', value='15', value_type='integer', category='attendance',
-        label='Grace Period (Minutes) ✓',
+        label='Grace Period (Minutes)',
         description='Minutes after shift start before marking Late.',
     ),
     dict(
         key='half_day_hours', value='4', value_type='decimal', category='attendance',
-        label='Half Day Threshold (Hours) ✓',
+        label='Half Day Threshold (Hours)',
         description='If hours worked < this value → Half Day Absent.',
     ),
     dict(
         key='late_marks_per_half_day', value='3', value_type='integer', category='attendance',
-        label='Late Marks → Half-Day LOP ✓',
+        label='Late Marks → Half-Day LOP',
         description='How many late arrivals trigger 0.5 LOP. Default 3: 3 lates = 0.5 LOP.',
     ),
     dict(
         key='overtime_multiplier', value='1.5', value_type='decimal', category='attendance',
-        label='Overtime Pay Multiplier ✓',
+        label='Overtime Pay Multiplier',
         description='OT pay = hourly rate × OT hours × this. Default 1.5 = time-and-a-half.',
     ),
     dict(
         key='auto_absent_enabled', value='true', value_type='boolean', category='attendance',
-        label='Auto Absent Marking ✓',
+        label='Auto Absent Marking',
         description='If true, nightly cron marks employees absent if no check-in recorded.',
     ),
     dict(
         key='wfh_enabled', value='true', value_type='boolean', category='attendance',
-        label='Work From Home (WFH) Enabled ✓',
+        label='Work From Home (WFH) Enabled',
         description='If false, WFH option is hidden from employees in regularization.',
     ),
     dict(
         key='regularization_window_days', value='7', value_type='integer', category='attendance',
-        label='Regularization Window (Days) ✓',
+        label='Regularization Window (Days)',
         description='Employee can request attendance correction within this many past days.',
     ),
 
     # ═══════════════ LEAVE ═══════════════
     dict(
         key='leave_year_basis', value='calendar', value_type='string', category='leave',
-        label='Leave Year Basis ✓',
+        label='Leave Year Basis',
         description='calendar = Jan–Dec. fiscal = based on fiscal_year_start_month.',
     ),
     dict(
         key='carry_forward_month', value='1', value_type='integer', category='leave',
-        label='Carry Forward Processing Month ✓',
+        label='Carry Forward Processing Month',
         description='Month (1–12) when EL carry-forward is applied. Default 1 = January.',
     ),
     dict(
         key='cl_days_per_year', value='12', value_type='integer', category='leave',
-        label='Casual Leave (CL) — Days/Year ✓',
+        label='Casual Leave (CL) — Days/Year',
         description='Annual CL allocation for Regular employees.',
     ),
     dict(
         key='cl_monthly_cap', value='2', value_type='integer', category='leave',
-        label='Casual Leave — Monthly Cap ✓',
+        label='Casual Leave — Monthly Cap',
         description='Max CL per month. 0 = no cap.',
     ),
     dict(
         key='cl_advance_notice_days', value='2', value_type='integer', category='leave',
-        label='CL Advance Notice (Days) ✓',
+        label='CL Advance Notice (Days)',
         description='Minimum working days notice required for Casual Leave.',
     ),
     dict(
         key='sl_advance_notice_days', value='0', value_type='integer', category='leave',
-        label='SL Advance Notice (Days) ✓',
+        label='SL Advance Notice (Days)',
         description='Minimum working days notice required for Sick Leave. 0 = no restriction.',
     ),
     dict(
         key='el_advance_notice_days', value='1', value_type='integer', category='leave',
-        label='EL Advance Notice (Days) ✓',
+        label='EL Advance Notice (Days)',
         description='Minimum working days notice required for Earned Leave.',
     ),
     dict(
         key='sl_days_per_year', value='12', value_type='integer', category='leave',
-        label='Sick Leave (SL) — Days/Year ✓',
+        label='Sick Leave (SL) — Days/Year',
         description='Annual SL allocation for Regular employees.',
     ),
     dict(
         key='sl_doc_required_after_days', value='2', value_type='integer', category='leave',
-        label='SL Medical Certificate After (Days) ✓',
+        label='SL Medical Certificate After (Days)',
         description='Consecutive sick days after which medical certificate is mandatory.',
     ),
     dict(
         key='el_days_per_year', value='15', value_type='integer', category='leave',
-        label='Earned Leave (EL) — Days/Year ✓',
+        label='Earned Leave (EL) — Days/Year',
         description='Annual EL allocation for Regular employees.',
     ),
     dict(
         key='el_max_carry_forward', value='45', value_type='integer', category='leave',
-        label='EL — Max Carry Forward (Days) ✓',
+        label='EL — Max Carry Forward (Days)',
         description='Maximum EL days that carry to next year. Excess is lapsed.',
     ),
     dict(
         key='el_carry_forward', value='true', value_type='boolean', category='leave',
-        label='EL — Carry Forward Enabled ✓',
+        label='EL — Carry Forward Enabled',
         description='Whether unused Earned Leave balance carries to next year.',
     ),
     dict(
         key='cl_is_paid', value='true', value_type='boolean', category='leave',
-        label='CL — Paid Leave ✓',
+        label='CL — Paid Leave',
         description='Whether Casual Leave is paid. Affects LOP deduction in payslip.',
     ),
     dict(
         key='sl_is_paid', value='true', value_type='boolean', category='leave',
-        label='SL — Paid Leave ✓',
+        label='SL — Paid Leave',
         description='Whether Sick Leave is paid. Affects LOP deduction in payslip.',
     ),
     dict(
         key='el_is_paid', value='true', value_type='boolean', category='leave',
-        label='EL — Paid Leave ✓',
+        label='EL — Paid Leave',
         description='Whether Earned Leave is paid. Affects LOP deduction in payslip.',
     ),
     dict(
         key='sandwich_rule_enabled', value='true', value_type='boolean', category='leave',
-        label='Sandwich Rule ✓',
+        label='Sandwich Rule',
         description='If true, weekends between leave days are counted as leave.',
     ),
     dict(
         key='probation_earned_leave', value='false', value_type='boolean', category='leave',
-        label='Earned Leave During Probation ✓',
+        label='Earned Leave During Probation',
         description='If false, probation employees are not eligible for EL.',
     ),
     dict(
         key='leave_encashment_enabled', value='true', value_type='boolean', category='leave',
-        label='Leave Encashment Enabled ✓',
+        label='Leave Encashment Enabled',
         description='If true, EL encashment allowed at year-end.',
     ),
     dict(
         key='half_day_leave_enabled', value='true', value_type='boolean', category='leave',
-        label='Half Day Leave Enabled ✓',
+        label='Half Day Leave Enabled',
         description='If true, employees can apply for half-day leave.',
     ),
     dict(
         key='leave_balance_low_threshold', value='2', value_type='integer', category='leave',
-        label='Low Balance Alert (Days) ✓',
+        label='Low Balance Alert (Days)',
         description='Show low balance warning when remaining days fall below this.',
     ),
     dict(
         key='maternity_leave_days', value='182', value_type='integer', category='leave',
-        label='Maternity Leave (Days) ✓',
+        label='Maternity Leave (Days)',
         description='Maternity leave days for Regular employees.',
     ),
     dict(
         key='paternity_leave_days', value='7', value_type='integer', category='leave',
-        label='Paternity Leave (Days) ✓',
+        label='Paternity Leave (Days)',
         description='Paternity leave days for Regular employees.',
     ),
 
-    # ═══════════════ PAYROLL ═══════════════
-    dict(
-        key='pf_employee_percent', value='12', value_type='decimal', category='payroll',
-        label='PF Employee Contribution (%) ✓',
-        description='Employee PF deduction % of Basic salary.',
-    ),
-    dict(
-        key='pf_employer_percent', value='12', value_type='decimal', category='payroll',
-        label='PF Employer Contribution (%) ✓',
-        description='Employer PF contribution % of Basic (part of CTC).',
-    ),
-    dict(
-        key='esi_threshold_salary', value='21000', value_type='integer', category='payroll',
-        label='ESI Salary Threshold (₹) ✓',
-        description='Gross ≤ this: ESI applicable. Above: ESI exempt.',
-    ),
-    dict(
-        key='esi_employee_percent', value='0.75', value_type='decimal', category='payroll',
-        label='ESI Employee Contribution (%) ✓',
-        description='Employee ESI deduction % of gross salary.',
-    ),
-    dict(
-        key='esi_employer_percent', value='3.25', value_type='decimal', category='payroll',
-        label='ESI Employer Contribution (%) ✓',
-        description='Employer ESI contribution % of gross (part of CTC).',
-    ),
+    # ═══════════════ PAYROLL — ALL 11 DYNAMIC SETTINGS ═══════════════
     dict(
         key='basic_salary_percent', value='40', value_type='decimal', category='payroll',
-        label='Basic Salary (% of CTC) ✓',
-        description='Basic = CTC × this %. Used in salary config auto-fill.',
+        label='Basic Salary (% of CTC)',
+        description='Basic = Annual CTC × this % ÷ 12. Used in salary config auto-fill. Change here → all new salary configs auto-fill with new value.',
     ),
     dict(
         key='hra_percent_metro', value='50', value_type='decimal', category='payroll',
-        label='HRA % of Basic — Metro ✓',
-        description='HRA for metro employees = Basic × this %.',
+        label='HRA % of Basic — Metro City',
+        description='HRA for metro employees = Basic × this %. Change here → salary config auto-fills HRA % automatically.',
     ),
     dict(
         key='hra_percent_nonmetro', value='40', value_type='decimal', category='payroll',
-        label='HRA % of Basic — Non-Metro ✓',
+        label='HRA % of Basic — Non-Metro',
         description='HRA for non-metro employees = Basic × this %.',
     ),
     dict(
+        key='da_percent', value='10', value_type='decimal', category='payroll',
+        label='DA % of Basic (Dearness Allowance)',
+        description='DA = Basic × this %. Shown in salary config auto-fill. Change here → reflects in all new structures.',
+    ),
+    dict(
+        key='pf_employee_percent', value='12', value_type='decimal', category='payroll',
+        label='PF Employee Contribution (%)',
+        description='Employee PF deduction = Basic × this %. Change here → instantly reflected in next payroll run and payslip.',
+    ),
+    dict(
+        key='pf_employer_percent', value='12', value_type='decimal', category='payroll',
+        label='PF Employer Contribution (%)',
+        description='Employer PF contribution = Basic × this % (part of CTC). Shown in CTC breakdown.',
+    ),
+    dict(
+        key='esi_threshold_salary', value='21000', value_type='integer', category='payroll',
+        label='ESI Salary Threshold (₹)',
+        description='If effective gross ≤ this amount, ESI is deducted. Above this = ESI exempt. Change here → applies to next payroll run automatically.',
+    ),
+    dict(
+        key='esi_employee_percent', value='0.75', value_type='decimal', category='payroll',
+        label='ESI Employee Contribution (%)',
+        description='Employee ESI deduction = gross × this %. Change here → reflected in payroll run and payslip immediately.',
+    ),
+    dict(
+        key='esi_employer_percent', value='3.25', value_type='decimal', category='payroll',
+        label='ESI Employer Contribution (%)',
+        description='Employer ESI contribution = gross × this % (part of CTC). Shown in CTC breakup.',
+    ),
+    dict(
         key='payroll_lock_day', value='25', value_type='integer', category='payroll',
-        label='Payroll Lock Day ✓',
-        description='Day of month on which attendance is locked for payroll.',
+        label='Payroll Lock Day (1–31)',
+        description='Attendance is locked for payroll calculation only after this day of the month. E.g. set 26 → payroll run button is disabled until date ≥ 26. Change anytime — takes effect immediately.',
     ),
     dict(
         key='tds_flat_percent_contract', value='10', value_type='decimal', category='payroll',
-        label='TDS Flat Rate — Contract (%) ✓',
-        description='Flat TDS % for contract employees.',
+        label='TDS Flat Rate — Contract Employees (%)',
+        description='Flat TDS % applied to contract employee gross. Regular employees use income slab TDS. Change here → next run uses new rate.',
     ),
     dict(
         key='pt_slab_json',
         value='[{"upto":15000,"pt":0},{"upto":20000,"pt":150},{"upto":99999999,"pt":200}]',
         value_type='json', category='payroll',
-        label='Professional Tax Slabs (JSON) ✓',
-        description='PT slabs: [{upto: gross, pt: monthly_amount}].',
+        label='Professional Tax Slabs (JSON)',
+        description='PT slabs: [{"upto": gross_amount, "pt": monthly_pt}]. Change any slab → next payroll run uses new PT slabs automatically.',
     ),
 
     # ═══════════════ GENERAL ═══════════════
     dict(
         key='company_name', value='My Company', value_type='string', category='general',
-        label='Company Name ✓',
+        label='Company Name',
         description='Shown in payslip header, emails, and reports.',
     ),
     dict(
         key='company_logo_url', value='', value_type='string', category='general',
-        label='Company Logo URL ✓',
+        label='Company Logo URL',
         description='Logo URL shown in payslip and email headers.',
     ),
     dict(
         key='fiscal_year_start_month', value='4', value_type='integer', category='general',
-        label='Fiscal Year Start Month ✓',
+        label='Fiscal Year Start Month',
         description='1 = January, 4 = April.',
     ),
     dict(
         key='probation_period_months', value='6', value_type='integer', category='general',
-        label='Probation Period (Months) ✓',
+        label='Probation Period (Months)',
         description='Employees on probation for first N months from joining.',
     ),
     dict(
         key='timezone', value='Asia/Kolkata', value_type='string', category='general',
-        label='Timezone ✓',
+        label='Timezone',
         description='Company timezone for attendance timestamps.',
     ),
     dict(
         key='currency', value='INR', value_type='string', category='general',
-        label='Currency ✓',
+        label='Currency',
         description='Currency symbol used in payroll and reports.',
     ),
 ]

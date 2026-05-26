@@ -1,11 +1,21 @@
 # payroll/engine.py
 """
-Payroll Engine v3 — 100% dynamic from SystemSetting.
-- PF%, ESI%, OT multiplier, PT slabs — all from settings_helper
+Payroll Engine v4 — 100% dynamic from SystemSetting.
+- Basic%, HRA%, DA%, PF%, ESI%, OT multiplier, PT slabs, TDS, Lock Day — ALL from settings_helper
+- DA is now fully dynamic: read from da_percent system setting at runtime
 - Working days uses weekend_days setting (5-day or 6-day week)
 - LOP counted once as explicit deduction (no double-counting)
 - PF/ESI/PT prorated by effective_present/working_days
 - Full calculation breakdown stored per entry for payslip display
+
+CALCULATION METHOD: Full-Pay + Explicit-LOP
+  Step 1  Pay FULL monthly salary components (no proration of earnings).
+  Step 2  Add OT pay (rate from overtime_multiplier setting).
+  Step 3  LOP deduction = (structure.gross / working_days) × total_lop
+  Step 4  Prorate PF, ESI, PT by (effective_present / working_days).
+  Step 5  TDS on effective_gross (after LOP).
+  Step 6  net_pay = gross − lop − pf − esi − pt − tds  (min 0).
+  ALL rates read live from SystemSetting at runtime.
 """
 import calendar
 from decimal import Decimal, ROUND_HALF_UP
@@ -18,6 +28,7 @@ from attendance.settings_helper import (
     get_pf_employee_percent, get_pf_employer_percent,
     get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
     get_tds_flat_contract, get_pt_slabs, get_overtime_multiplier,
+    get_da_percent, get_auto_absent_enabled,
 )
 from leave.models import LeaveRequest
 from .models import SalaryStructure, PayrollRun, PayrollEntry
@@ -72,7 +83,7 @@ def calculate_late_lop(late_count: int) -> Decimal:
 
 
 def calculate_pt(gross: Decimal) -> Decimal:
-    """Dynamic PT based on pt_slab_json setting."""
+    """Dynamic PT based on pt_slab_json system setting."""
     slabs = get_pt_slabs()
     gross_float = float(gross)
     for slab in slabs:
@@ -125,152 +136,108 @@ def get_attendance_summary(employee, year, month):
         get_approved_leave_dates(employee, year, month)
     )
 
-    present = Decimal('0')
-    lop = Decimal('0')
-    ot_hrs = Decimal('0')
+    present    = Decimal('0')
+    lop        = Decimal('0')
+    ot_hrs     = Decimal('0')
     late_count = 0
-
-    # Dynamic system setting
-    from attendance.settings_helper import get_auto_absent_enabled
 
     auto_absent_enabled = get_auto_absent_enabled()
 
     for day in range(1, days_in_month + 1):
-
         d = date(year, month, day)
 
-        # Skip weekends
         if is_weekend(d):
             continue
 
         rec = record_map.get(d)
 
-        # ─────────────────────────────────────────────
-        # Attendance record exists
-        # ─────────────────────────────────────────────
         if rec:
-
             status = str(rec.status).lower()
 
-            # PRESENT
             if status == 'present':
                 present += Decimal('1')
 
-            # LATE
             elif status == 'late':
                 present += Decimal('1')
                 late_count += 1
 
-            # HALF DAY
             elif status == 'half_day':
-
                 if d in paid_full_dates or d in paid_half_dates:
                     present += Decimal('1')
-
                 else:
                     present += Decimal('0.5')
                     lop += Decimal('0.5')
 
-            # ABSENT / AUTO ABSENT / LOP
-            elif status in [
-                'absent',
-                'auto_absent',
-                'lop',
-            ]:
-
+            elif status in ['absent', 'auto_absent', 'lop']:
                 if d in paid_full_dates or d in paid_half_dates:
                     present += Decimal('1')
-
                 else:
-
-                    # Dynamic policy
                     if auto_absent_enabled:
                         lop += Decimal('1')
 
-                    else:
-                        pass
-
-            # LEAVE
             elif status in ('leave', 'lop_leave'):
-
                 if d in lop_dates:
                     lop += Decimal('1')
-
                 else:
                     present += Decimal('1')
 
-            # HOLIDAY
             elif status == 'holiday':
                 present += Decimal('1')
 
-            # OT HOURS
             if rec.ot_hours:
                 ot_hrs += Decimal(str(rec.ot_hours))
 
-        # ─────────────────────────────────────────────
-        # No attendance record
-        # ─────────────────────────────────────────────
         else:
-
-            # Paid leave
             if d in paid_full_dates or d in paid_half_dates:
                 present += Decimal('1')
-
-            # LOP leave
             elif d in lop_dates:
                 lop += Decimal('1')
-
-            # Missing attendance
             else:
-
-                # Auto absent enabled
                 if auto_absent_enabled:
                     lop += Decimal('1')
-
-                # Ignore day completely
-                else:
-                    pass
 
     late_lop = calculate_late_lop(late_count)
 
     return {
-        'present': present,
-        'lop_days': lop,
-        'late_lop': late_lop,
+        'present':    present,
+        'lop_days':   lop,
+        'late_lop':   late_lop,
         'late_count': late_count,
-        'ot_hours': ot_hrs,
+        'ot_hours':   ot_hrs,
     }
+
+
 # ── Main Engine ───────────────────────────────────────────────────────────────
 
 def process_payroll_run(payroll_run: PayrollRun):
     """
-    CALCULATION METHOD: Full-Pay + Explicit-LOP
+    All 11 payroll settings read live from SystemSetting at runtime:
+    1. basic_salary_percent  — not used in engine (used at salary structure creation)
+    2. hra_percent_metro / hra_percent_nonmetro — stored in SalaryStructure.hra_percent
+    3. da_percent            — READ LIVE from settings each run (overrides structure value)
+    4. pf_employee_percent   — READ LIVE
+    5. pf_employer_percent   — informational / CTC
+    6. esi_employee_percent  — READ LIVE
+    7. esi_employer_percent  — informational / CTC
+    8. esi_threshold_salary  — READ LIVE (eligibility gate)
+    9. payroll_lock_day      — enforced in views/frontend
+    10. tds_flat_percent_contract — READ LIVE
+    11. pt_slab_json         — READ LIVE
 
-    Step 1  Pay FULL monthly salary components (no proration of earnings).
-    Step 2  Add OT pay (rate from overtime_multiplier setting).
-    Step 3  LOP deduction = (structure.gross / working_days) × total_lop
-            ↳ ONE explicit line, not hidden inside earnings proration.
-    Step 4  Prorate PF, ESI, PT by (effective_present / working_days).
-            ↳ Prevents deductions > pay for 1–2 day employees.
-    Step 5  TDS on effective_gross (after LOP).
-    Step 6  net_pay = gross − lop − pf − esi − pt − tds  (min 0).
-
-    ALL rates (PF%, ESI%, PT slabs, OT multiplier) are read live from
-    SystemSetting at runtime — changing a setting takes effect on the
-    next payroll run immediately.
-
-    Working days uses is_weekend() which respects weekend_days setting,
-    so 6-day week (Sunday only off) automatically increases working_days.
+    DA is always recalculated from current da_percent system setting
+    (not from the stored structure.da_percent) so changing DA% in
+    System Settings reflects in the very next payroll run.
     """
     month = payroll_run.month
     year  = payroll_run.year
     working_days, days_in_month = get_working_days_in_month(year, month)
     as_of = date(year, month, days_in_month)
 
-    # Read live rates from settings
-    pf_emp_pct  = get_pf_employee_percent()  / Decimal('100')
-    esi_emp_pct = get_esi_employee_percent() / Decimal('100')
+    # ── Read ALL live rates from System Settings ──────────────────────
+    pf_emp_pct    = get_pf_employee_percent()  / Decimal('100')
+    esi_emp_pct   = get_esi_employee_percent() / Decimal('100')
     esi_threshold = get_esi_threshold()
+    da_pct_live   = get_da_percent() / Decimal('100')   # DA from settings, NOT structure
 
     employees = User.objects.filter(is_active=True)
     created, skipped = [], []
@@ -299,20 +266,31 @@ def process_payroll_run(payroll_run: PayrollRun):
         )
 
         # ── Step 1: Full monthly earnings ─────────────────────────────
+        # Basic and HRA are from the salary structure (set at creation time)
         basic     = ROUND2(structure.basic)
         hra       = ROUND2(structure.hra)
-        da        = ROUND2(structure.da)
-        special   = ROUND2(structure.special_allowance)
+
+        # DA: LIVE from system setting — changing da_percent in System Settings
+        # takes effect on the very next payroll run without editing salary structure
+        da        = ROUND2(basic * da_pct_live)
+
         transport = ROUND2(structure.transport)
         medical   = ROUND2(structure.medical)
         other     = ROUND2(structure.other_allowance)
 
-        # ── Step 2: OT pay (dynamic multiplier from settings) ─────────
+        # Special allowance = CTC monthly − all named components
+        monthly_ctc = ROUND2(Decimal(str(structure.ctc)) / Decimal('12'))
+        special = ROUND2(
+            monthly_ctc - basic - hra - da - transport - medical - other
+        )
+        special = max(special, Decimal('0'))  # never negative
+
+        # ── Step 2: OT pay ────────────────────────────────────────────
         ot_pay = calculate_ot_pay(basic, working_days, ot_hours)
         gross  = basic + hra + da + special + transport + medical + other + ot_pay
 
         # ── Step 3: LOP deduction ─────────────────────────────────────
-        structure_gross = Decimal(str(structure.gross))
+        structure_gross = gross - ot_pay  # exclude OT from LOP base
         if working_days > 0 and total_lop > 0:
             per_day_rate  = ROUND2(structure_gross / Decimal(str(working_days)))
             lop_deduction = ROUND2(per_day_rate * total_lop)
@@ -325,17 +303,17 @@ def process_payroll_run(payroll_run: PayrollRun):
         # ── Step 4: Prorate statutory deductions ──────────────────────
         ratio = (effective_present / Decimal(str(working_days))) if working_days > 0 else Decimal('0')
 
-        # PF: dynamic % of basic (prorated)
+        # PF: live % of basic (prorated by attendance ratio)
         pf_emp  = ROUND2(basic * pf_emp_pct * ratio)
 
-        # ESI: dynamic % of gross, only if gross <= esi_threshold (prorated)
+        # ESI: live % of effective gross, only if gross <= threshold (prorated)
         esi_emp = ROUND2(effective_gross * esi_emp_pct * ratio) if effective_gross <= esi_threshold else Decimal('0')
 
-        # PT: dynamic slabs on effective_gross (prorated)
+        # PT: dynamic slabs on effective gross (prorated)
         pt_full = calculate_pt(effective_gross)
         pt      = ROUND2(pt_full * ratio)
 
-        # ── Step 5: TDS on effective gross ────────────────────────────
+        # ── Step 5: TDS ───────────────────────────────────────────────
         tds = calculate_tds(effective_gross, emp.employee_type)
 
         # ── Step 6: Net pay ───────────────────────────────────────────

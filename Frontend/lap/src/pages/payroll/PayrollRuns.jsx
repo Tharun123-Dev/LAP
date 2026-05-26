@@ -1,18 +1,21 @@
-// src/pages/payroll/PayrollRuns.jsx — FULL REPLACEMENT v3
-// Shows active payroll settings panel before processing,
-// per-row deduction breakdown, OT column, detailed net pay formula
+// src/pages/payroll/PayrollRuns.jsx — FULL REPLACEMENT
+// All 11 payroll settings shown dynamically from /api/payroll/settings-defaults/
+// Lock day enforced: if today < lock_day and run month = current month → blocked
+// Per-row deduction labels show ACTUAL % from settings (not hardcoded 12%/0.75%)
 import { useEffect, useState } from 'react'
 import {
   getRunsApi, createRunApi, processRunApi,
-  approveRunApi, getRunDetailApi, addAdjustmentApi
+  approveRunApi, getRunDetailApi, addAdjustmentApi,
+  getPayrollSettingsDefaultsApi,
 } from '../../api/services/payroll'
-import systemSettingsService from '../../api/services/systemsettings'
 import usePermission from '../../hooks/usePermission'
 import toast from 'react-hot-toast'
 
-const MONTHS = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-const fmt = v => `₹${parseFloat(v||0).toLocaleString('en-IN',{minimumFractionDigits:2})}`
-const n   = v => parseFloat(v||0)
+const MONTHS     = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTHS_FULL= ['','January','February','March','April','May','June','July','August','September','October','November','December']
+const fmt = v  => `₹${parseFloat(v||0).toLocaleString('en-IN',{minimumFractionDigits:2})}`
+const n   = v  => parseFloat(v||0)
+const pct = v  => `${parseFloat(v||0)}%`
 
 const STATUS_STYLE = {
   draft:     { bg:'#f3f4f6', color:'#6b7280', dot:'#9ca3af' },
@@ -21,23 +24,27 @@ const STATUS_STYLE = {
   locked:    { bg:'#dcfce7', color:'#166534', dot:'#22c55e' },
 }
 
-function DeductionPanel({ e }) {
+// Dynamic deduction panel using LIVE settings %
+function DeductionPanel({ e, settings }) {
+  const pfPct  = settings?.pf_employee_percent  ?? 12
+  const esiPct = settings?.esi_employee_percent ?? 0.75
+
   const items = [
-    { label:`PF (12% of Basic, prorated)`, value:n(e.pf_employee),  color:'#7c3aed' },
-    { label:'ESI (0.75%, prorated)',        value:n(e.esi_employee), color:'#2563eb' },
-    { label:'Professional Tax',             value:n(e.pt),           color:'#0891b2' },
-    { label:'TDS',                          value:n(e.tds),          color:'#dc2626' },
-    { label:`LOP (${parseFloat(e.lop_days||0).toFixed(1)} days)`, value:n(e.lop_deduction), color:'#ea580c' },
+    { label:`PF (${pfPct}% of Basic, prorated)`, value:n(e.pf_employee),  color:'#7c3aed' },
+    { label:`ESI (${esiPct}% gross, prorated)`,  value:n(e.esi_employee), color:'#2563eb' },
+    { label:'Professional Tax (slab)',            value:n(e.pt),           color:'#0891b2' },
+    { label:'TDS',                                value:n(e.tds),          color:'#dc2626' },
+    { label:`LOP (${parseFloat(e.lop_days||0).toFixed(1)} days × day-rate)`, value:n(e.lop_deduction), color:'#ea580c' },
   ].filter(i => i.value > 0)
 
-  if (!items.length) return <span style={{ color:'#aaa', fontSize:'12px' }}>₹0.00</span>
+  if (!items.length) return <span style={{ color:'#aaa', fontSize:'12px' }}>No deductions</span>
 
   return (
     <div>
       {items.map(i => (
-        <div key={i.label} style={{ display:'flex', justifyContent:'space-between', gap:'8px', fontSize:'11px', padding:'1px 0' }}>
+        <div key={i.label} style={{ display:'flex', justifyContent:'space-between', gap:'8px', fontSize:'11px', padding:'2px 0' }}>
           <span style={{ color:'#777' }}>{i.label}</span>
-          <span style={{ color:i.color, fontWeight:600 }}>−{fmt(i.value)}</span>
+          <span style={{ color:i.color, fontWeight:600, whiteSpace:'nowrap' }}>−{fmt(i.value)}</span>
         </div>
       ))}
       <div style={{ borderTop:'1px solid #e5e7eb', marginTop:'4px', paddingTop:'4px', display:'flex', justifyContent:'space-between', fontSize:'12px' }}>
@@ -48,38 +55,55 @@ function DeductionPanel({ e }) {
   )
 }
 
+// Settings panel showing all 11 live settings
 function SettingsPanel({ settings }) {
-  if (!settings) return null
-  const find = key => settings.find(s => s.key === key)?.value
-  const items = [
-    // { label:'Work Days/Week',    value: find('work_days_per_week')    || '5',    color:'#1d4ed8' },
-    { label:'Weekend Off',       value: (() => { try { const w = JSON.parse(find('weekend_days') || '["saturday","sunday"]'); return w.map(d=>d[0].toUpperCase()+d.slice(1)).join(', ') } catch { return 'Sat, Sun' } })(), color:'#0369a1' },
-    { label:'PF Employee %',     value: (find('pf_employee_percent')  || '12') + '%', color:'#7c3aed' },
-    { label:'ESI Employee %',    value: (find('esi_employee_percent') || '0.75') + '%', color:'#2563eb' },
-    { label:'ESI Threshold',     value: '₹' + (find('esi_threshold_salary') || '21000'), color:'#0891b2' },
-    { label:'OT Multiplier',     value: find('overtime_multiplier')   || '1.5'  + '×', color:'#7c3aed' },
-    { label:'TDS (Contract)',     value: (find('tds_flat_percent_contract') || '10') + '%', color:'#dc2626' },
-    { label:'Late → LOP',        value: `Every ${find('late_marks_per_half_day') || '3'} lates = 0.5 LOP`, color:'#ea580c' },
+  if (!settings) return (
+    <div style={{ background:'#f3f4f6', borderRadius:'8px', padding:'10px 14px', marginBottom:'12px' }}>
+      <p style={{ margin:0, fontSize:'12px', color:'#aaa' }}>Loading payroll settings…</p>
+    </div>
+  )
+
+  const panels = [
+    { label:'Basic %',          value:`${settings.basic_percent}% of CTC`,          color:'#1d4ed8', icon:'🏦' },
+    { label:'HRA (Metro)',      value:`${settings.hra_percent_metro}% of Basic`,      color:'#0891b2', icon:'🏙' },
+    { label:'HRA (Non-Metro)',  value:`${settings.hra_percent_nonmetro}% of Basic`,   color:'#0891b2', icon:'🏘' },
+    { label:'DA %',             value:`${settings.da_percent}% of Basic`,             color:'#059669', icon:'📈' },
+    { label:'PF Employee',      value:`${settings.pf_employee_percent}% of Basic`,    color:'#7c3aed', icon:'🛡' },
+    { label:'PF Employer',      value:`${settings.pf_employer_percent}% of Basic`,    color:'#7c3aed', icon:'🏢' },
+    { label:'ESI Employee',     value:`${settings.esi_employee_percent}% of Gross`,   color:'#2563eb', icon:'🏥' },
+    { label:'ESI Employer',     value:`${settings.esi_employer_percent}% of Gross`,   color:'#2563eb', icon:'🏢' },
+    { label:'ESI Threshold',    value:`≤ ₹${n(settings.esi_threshold).toLocaleString('en-IN')}`,    color:'#0891b2', icon:'📊' },
+    { label:'PT Slabs',         value:'Dynamic (from settings)',                       color:'#0891b2', icon:'📋' },
+    { label:'TDS Contract',     value:`${settings.tds_flat_contract}% flat`,          color:'#dc2626', icon:'📑' },
+    { label:'OT Multiplier',    value:`${settings.overtime_multiplier}×`,             color:'#7c3aed', icon:'⏱' },
+    { label:'Payroll Lock Day', value:`Day ${settings.payroll_lock_day} of month`,    color:'#ea580c', icon:'🔒' },
   ]
+
   return (
     <div style={{ background:'#f5f3ff', border:'1px solid #ede9fe', borderRadius:'10px', padding:'14px 16px', marginBottom:'14px' }}>
       <p style={{ margin:'0 0 10px', fontSize:'11px', fontWeight:700, color:'#7c3aed', textTransform:'uppercase', letterSpacing:'0.05em' }}>
-        📐 Active Payroll Settings (applied in this run)
+        📐 All 11 Payroll Settings — Applied This Run (Live from System Settings)
       </p>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:'8px' }}>
-        {items.map(s => (
-          <div key={s.label} style={{ background:'#fff', borderRadius:'7px', padding:'7px 10px' }}>
-            <p style={{ margin:0, fontSize:'12px', fontWeight:700, color:s.color }}>{s.value}</p>
-            <p style={{ margin:'1px 0 0', fontSize:'10px', color:'#aaa' }}>{s.label}</p>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(155px,1fr))', gap:'7px' }}>
+        {panels.map(s => (
+          <div key={s.label} style={{ background:'#fff', borderRadius:'7px', padding:'7px 10px', display:'flex', alignItems:'flex-start', gap:'6px' }}>
+            <span style={{ fontSize:'14px', marginTop:'1px' }}>{s.icon}</span>
+            <div>
+              <p style={{ margin:0, fontSize:'11px', fontWeight:700, color:s.color, lineHeight:1.3 }}>{s.value}</p>
+              <p style={{ margin:'2px 0 0', fontSize:'9px', color:'#aaa', textTransform:'uppercase', letterSpacing:'0.04em' }}>{s.label}</p>
+            </div>
           </div>
         ))}
       </div>
+      <p style={{ margin:'10px 0 0', fontSize:'10px', color:'#a78bfa', fontStyle:'italic' }}>
+        ✏️ Change any value in System Settings → Payroll Settings. Changes take effect on the next payroll run immediately.
+      </p>
     </div>
   )
 }
 
 export default function PayrollRuns() {
-  const { can } = usePermission()
+  const { can }           = usePermission()
   const [runs,      setRuns]      = useState([])
   const [loading,   setLoading]   = useState(false)
   const [creating,  setCreating]  = useState(false)
@@ -89,14 +113,35 @@ export default function PayrollRuns() {
   const [adjEntry,  setAdjEntry]  = useState(null)
   const [adjForm,   setAdjForm]   = useState({ type:'bonus', amount:'', reason:'' })
   const [expandRow, setExpandRow] = useState(null)
-  const [settings,  setSettings]  = useState(null)
+  const [settings,  setSettings]  = useState(null)   // live 11 payroll settings
+  const [lockWarn,  setLockWarn]  = useState(null)   // lock day warning
 
   useEffect(() => {
     load()
-    systemSettingsService.getAll().then(res => {
-      setSettings(Object.values(res.data).flat())
-    }).catch(() => {})
+    getPayrollSettingsDefaultsApi()
+      .then(r => setSettings(r.data))
+      .catch(() => {})
   }, [])
+
+  // Recheck lock day whenever selected run or settings change
+  useEffect(() => {
+    if (!settings || !selected) { setLockWarn(null); return }
+    const today     = new Date()
+    const lockDay   = settings.payroll_lock_day ?? 25
+    const isCurrentMonth = (
+      today.getFullYear() === selected.year &&
+      today.getMonth() + 1 === selected.month
+    )
+    if (isCurrentMonth && today.getDate() < lockDay && selected.status === 'draft') {
+      setLockWarn(
+        `⏳ Payroll for ${MONTHS_FULL[selected.month]} ${selected.year} cannot be processed until day ${lockDay} of this month. ` +
+        `Today is ${today.getDate()}${['th','st','nd','rd'][Math.min(today.getDate()%10,3)]||'th'} — ${lockDay - today.getDate()} day(s) remaining. ` +
+        `(Change payroll_lock_day in System Settings → Payroll Settings)`
+      )
+    } else {
+      setLockWarn(null)
+    }
+  }, [selected, settings])
 
   const load = async () => {
     setLoading(true)
@@ -105,12 +150,15 @@ export default function PayrollRuns() {
     finally { setLoading(false) }
   }
 
-  const loadDetail = async (id) => {
+  const loadDetail = async id => {
     try { const r = await getRunDetailApi(id); setDetail(r.data) }
     catch { toast.error('Failed to load detail') }
   }
 
-  const handleSelect = async (run) => { setSelected(run); setExpandRow(null); await loadDetail(run.id) }
+  const handleSelect = async run => {
+    setSelected(run); setExpandRow(null)
+    await loadDetail(run.id)
+  }
 
   const handleCreate = async () => {
     setCreating(true)
@@ -119,15 +167,17 @@ export default function PayrollRuns() {
     finally { setCreating(false) }
   }
 
-  const handleProcess = async (id) => {
+  const handleProcess = async id => {
     try {
       const r = await processRunApi(id)
       toast.success(`Processed: ${r.data.created} employees`)
       load(); loadDetail(id)
-    } catch (e) { toast.error(e.response?.data?.error || 'Processing failed') }
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Processing failed')
+    }
   }
 
-  const handleApprove = async (id) => {
+  const handleApprove = async id => {
     if (!window.confirm('Approve and lock this payroll? This cannot be undone.')) return
     try { await approveRunApi(id); toast.success('Approved & locked!'); load(); loadDetail(id) }
     catch (e) { toast.error(e.response?.data?.error || 'Approval failed') }
@@ -155,34 +205,44 @@ export default function PayrollRuns() {
   } : null
 
   return (
-    <div style={{ display:'grid', gridTemplateColumns: selected ? 'minmax(240px,300px) 1fr' : '1fr', gap:'20px' }}>
+    <div style={{ display:'grid', gridTemplateColumns: selected ? 'minmax(230px,290px) 1fr' : '1fr', gap:'20px' }}>
 
-      {/* Left — run list */}
+      {/* ── Left: run list ───────────────────────────────── */}
       <div>
         {can('process_payroll') && (
-          <div style={C}>
+          <div style={CARD}>
             <p style={{ margin:'0 0 10px', fontSize:'13px', fontWeight:700 }}>➕ New Payroll Run</p>
             <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-              <select value={newRun.month} onChange={e => setNewRun(p=>({...p,month:parseInt(e.target.value)}))} style={S}>
+              <select value={newRun.month} onChange={e => setNewRun(p=>({...p,month:parseInt(e.target.value)}))} style={SEL}>
                 {MONTHS.slice(1).map((m,i) => <option key={i+1} value={i+1}>{m}</option>)}
               </select>
-              <input type="number" value={newRun.year} onChange={e => setNewRun(p=>({...p,year:parseInt(e.target.value)}))} style={{...S, width:'80px'}} />
+              <input type="number" value={newRun.year} onChange={e => setNewRun(p=>({...p,year:parseInt(e.target.value)}))} style={{...SEL, width:'80px'}} />
               <button onClick={handleCreate} disabled={creating} style={BP}>{creating ? '…' : 'Create'}</button>
             </div>
+            {settings && (
+              <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#ea580c' }}>
+                🔒 Lock day: <strong>Day {settings.payroll_lock_day}</strong> — can only process on/after this day
+              </p>
+            )}
           </div>
         )}
 
         {loading ? <p style={{ color:'#888', fontSize:'13px' }}>Loading…</p> : (
           <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
             {runs.map(run => {
-              const st = STATUS_STYLE[run.status] || STATUS_STYLE.draft
+              const st    = STATUS_STYLE[run.status] || STATUS_STYLE.draft
               const isSel = selected?.id === run.id
               return (
-                <div key={run.id} onClick={() => handleSelect(run)} style={{ background:'#fff', borderRadius:'10px', padding:'14px 16px', border:`1px solid ${isSel ? '#1a1a2e' : '#e5e7eb'}`, cursor:'pointer', boxShadow: isSel ? '0 0 0 3px rgba(26,26,46,0.12)' : 'none' }}>
+                <div key={run.id} onClick={() => handleSelect(run)}
+                  style={{ background:'#fff', borderRadius:'10px', padding:'14px 16px',
+                    border:`1px solid ${isSel ? '#1a1a2e' : '#e5e7eb'}`,
+                    cursor:'pointer', boxShadow: isSel ? '0 0 0 3px rgba(26,26,46,0.12)' : 'none' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }}>
                     <span style={{ fontWeight:700, fontSize:'14px' }}>{MONTHS[run.month]} {run.year}</span>
-                    <span style={{ padding:'2px 8px', borderRadius:'6px', fontSize:'11px', fontWeight:600, background:st.bg, color:st.color, display:'flex', alignItems:'center', gap:'4px', textTransform:'capitalize' }}>
-                      <span style={{ width:'6px', height:'6px', borderRadius:'50%', background:st.dot, display:'inline-block' }} />{run.status}
+                    <span style={{ padding:'2px 8px', borderRadius:'6px', fontSize:'11px', fontWeight:600,
+                      background:st.bg, color:st.color, display:'flex', alignItems:'center', gap:'4px', textTransform:'capitalize' }}>
+                      <span style={{ width:'6px', height:'6px', borderRadius:'50%', background:st.dot, display:'inline-block' }} />
+                      {run.status}
                     </span>
                   </div>
                   <div style={{ fontSize:'12px', color:'#888', display:'flex', justifyContent:'space-between' }}>
@@ -193,49 +253,74 @@ export default function PayrollRuns() {
               )
             })}
             {!runs.length && (
-              <div style={{ textAlign:'center', padding:'40px', color:'#aaa', background:'#fff', borderRadius:'10px', border:'1px solid #e5e7eb' }}>No payroll runs yet.</div>
+              <div style={{ textAlign:'center', padding:'40px', color:'#aaa', background:'#fff', borderRadius:'10px', border:'1px solid #e5e7eb' }}>
+                No payroll runs yet.
+              </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Right — detail */}
+      {/* ── Right: detail ────────────────────────────────── */}
       {selected && detail && (
         <div style={{ minWidth:0 }}>
-          {/* Header */}
-          <div style={{ ...C, marginBottom:'14px' }}>
+
+          {/* Header card */}
+          <div style={{ ...CARD, marginBottom:'14px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'12px' }}>
               <div>
-                <h3 style={{ margin:0, fontSize:'17px', fontWeight:700 }}>{MONTHS[detail.run.month]} {detail.run.year} Payroll</h3>
+                <h3 style={{ margin:0, fontSize:'17px', fontWeight:700 }}>
+                  {MONTHS_FULL[detail.run.month]} {detail.run.year} Payroll
+                </h3>
                 <p style={{ margin:'4px 0 0', fontSize:'12px', color:'#888' }}>
                   {detail.entries.length} employees · <strong style={{ textTransform:'capitalize' }}>{detail.run.status}</strong>
+                  {detail.run.locked_at && <span> · Locked {new Date(detail.run.locked_at).toLocaleDateString()}</span>}
                 </p>
               </div>
               <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
                 {can('process_payroll') && detail.run.status === 'draft' && (
-                  <button onClick={() => handleProcess(detail.run.id)} style={{ padding:'8px 16px', background:'#fef9c3', color:'#854d0e', border:'1px solid #fde047', borderRadius:'8px', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>▶ Process</button>
+                  <button
+                    onClick={() => !lockWarn && handleProcess(detail.run.id)}
+                    disabled={!!lockWarn}
+                    style={{ padding:'8px 16px', background: lockWarn ? '#f3f4f6' : '#fef9c3',
+                      color: lockWarn ? '#9ca3af' : '#854d0e',
+                      border:`1px solid ${lockWarn ? '#e5e7eb' : '#fde047'}`,
+                      borderRadius:'8px', fontSize:'13px', fontWeight:600,
+                      cursor: lockWarn ? 'not-allowed' : 'pointer' }}>
+                    {lockWarn ? '🔒 Locked' : '▶ Process'}
+                  </button>
                 )}
                 {can('approve_payroll') && detail.run.status === 'processed' && (
-                  <button onClick={() => handleApprove(detail.run.id)} style={{ padding:'8px 16px', background:'#dcfce7', color:'#166534', border:'1px solid #86efac', borderRadius:'8px', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>✅ Approve & Lock</button>
+                  <button onClick={() => handleApprove(detail.run.id)}
+                    style={{ padding:'8px 16px', background:'#dcfce7', color:'#166534', border:'1px solid #86efac', borderRadius:'8px', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>
+                    ✅ Approve & Lock
+                  </button>
                 )}
               </div>
             </div>
 
-            {/* Active settings panel */}
-            {detail.run.status !== 'locked' && <SettingsPanel settings={settings} />}
+            {/* Lock day warning */}
+            {lockWarn && (
+              <div style={{ marginTop:'12px', background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:'8px', padding:'11px 14px', fontSize:'12px', color:'#9a3412' }}>
+                {lockWarn}
+              </div>
+            )}
+
+            {/* Settings panel — all 11 settings */}
+            {detail.run.status !== 'locked' && <div style={{ marginTop:'14px' }}><SettingsPanel settings={settings} /></div>}
 
             {/* Summary tiles */}
             {totals && (
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))', gap:'10px', marginTop:'14px' }}>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(108px,1fr))', gap:'10px', marginTop:'14px' }}>
                 {[
-                  { l:'Total Gross',  v:fmt(totals.gross),  c:'#1d4ed8', bg:'#eff6ff' },
-                  { l:'OT Pay',       v:fmt(totals.ot_pay), c:'#7c3aed', bg:'#f5f3ff' },
-                  { l:'PF Total',     v:fmt(totals.pf),     c:'#0891b2', bg:'#ecfeff' },
-                  { l:'ESI Total',    v:fmt(totals.esi),    c:'#0891b2', bg:'#ecfeff' },
-                  { l:'PT Total',     v:fmt(totals.pt),     c:'#0891b2', bg:'#ecfeff' },
-                  { l:'TDS Total',    v:fmt(totals.tds),    c:'#dc2626', bg:'#fef2f2' },
-                  { l:'LOP Deductions',v:fmt(totals.lop),   c:'#ea580c', bg:'#fff7ed' },
-                  { l:'Total Net Pay',v:fmt(totals.net),    c:'#16a34a', bg:'#f0fdf4' },
+                  { l:'Gross Total',   v:fmt(totals.gross),  c:'#1d4ed8', bg:'#eff6ff'  },
+                  { l:'OT Pay',        v:fmt(totals.ot_pay), c:'#7c3aed', bg:'#f5f3ff'  },
+                  { l:'PF (Employee)', v:fmt(totals.pf),     c:'#7c3aed', bg:'#f5f3ff'  },
+                  { l:'ESI (Emp.)',    v:fmt(totals.esi),    c:'#2563eb', bg:'#eff6ff'  },
+                  { l:'Prof. Tax',     v:fmt(totals.pt),     c:'#0891b2', bg:'#ecfeff'  },
+                  { l:'TDS',           v:fmt(totals.tds),    c:'#dc2626', bg:'#fef2f2'  },
+                  { l:'LOP Ded.',      v:fmt(totals.lop),    c:'#ea580c', bg:'#fff7ed'  },
+                  { l:'Net Pay Total', v:fmt(totals.net),    c:'#16a34a', bg:'#f0fdf4'  },
                 ].map(s => (
                   <div key={s.l} style={{ background:s.bg, borderRadius:'8px', padding:'10px 8px', textAlign:'center' }}>
                     <p style={{ margin:0, fontSize:'13px', fontWeight:800, color:s.c }}>{s.v}</p>
@@ -252,135 +337,126 @@ export default function PayrollRuns() {
               <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'12px' }}>
                 <thead>
                   <tr style={{ background:'#f8fafc' }}>
-                    {['Employee','Attendance','OT','Gross Earnings','Deductions (detail)','Net Pay',''].map(h => (
-                      <th key={h} style={{ padding:'10px 12px', textAlign:'left', fontWeight:600, color:'#555', fontSize:'11px', textTransform:'uppercase', letterSpacing:'0.04em', whiteSpace:'nowrap' }}>{h}</th>
+                    {['Employee','Days (Present/Working)','OT','Gross','Deductions (Live % breakdown)','Net Pay',''].map(h => (
+                      <th key={h} style={{ padding:'10px 12px', textAlign:'left', fontWeight:600, color:'#555', fontSize:'10px', textTransform:'uppercase', letterSpacing:'0.04em', whiteSpace:'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {detail.entries.map((e, i) => {
-                    const isExp    = expandRow === e.id
-                    const hasLOP   = n(e.lop_days) > 0
-                    const hasOT    = n(e.ot_hours) > 0
-                    const netZero  = n(e.net_pay) === 0
+                    const isExp   = expandRow === e.id
+                    const hasLOP  = n(e.lop_days) > 0
+                    const hasOT   = n(e.ot_hours) > 0
+                    const netZero = n(e.net_pay) === 0
                     return (
                       <>
-                        <tr
-                          key={e.id}
+                        <tr key={e.id}
                           style={{ borderTop:'1px solid #f1f5f9', background: isExp ? '#f0f9ff' : i%2===0 ? '#fff' : '#fafafa', cursor:'pointer' }}
-                          onClick={() => setExpandRow(isExp ? null : e.id)}
-                        >
-                          <td style={T}>
+                          onClick={() => setExpandRow(isExp ? null : e.id)}>
+
+                          <td style={TD}>
                             <p style={{ margin:0, fontWeight:600, color:'#111', fontSize:'13px' }}>{e.employee_name}</p>
                             <p style={{ margin:0, color:'#aaa', fontSize:'10px' }}>{e.emp_code} · {e.department}</p>
                           </td>
-                          <td style={T}>
-                            <div style={{ fontSize:'12px', fontWeight:500 }}>{parseFloat(e.present_days).toFixed(1)}<span style={{ color:'#aaa' }}>/{e.working_days}</span></div>
-                            {hasLOP && <div style={{ fontSize:'10px', color:'#ea580c', fontWeight:600 }}>{parseFloat(e.lop_days).toFixed(1)} LOP</div>}
+
+                          <td style={TD}>
+                            <div style={{ fontSize:'12px', fontWeight:600 }}>
+                              {parseFloat(e.present_days).toFixed(1)}
+                              <span style={{ color:'#aaa', fontWeight:400 }}>/{e.working_days}</span>
+                            </div>
+                            {hasLOP && <div style={{ fontSize:'10px', color:'#ea580c', fontWeight:600 }}>⚡ {parseFloat(e.lop_days).toFixed(1)} LOP days</div>}
                           </td>
-                          <td style={T}>
+
+                          <td style={TD}>
                             {hasOT
-                              ? <div><div style={{ fontSize:'11px', color:'#7c3aed', fontWeight:700 }}>{parseFloat(e.ot_hours).toFixed(1)}h</div><div style={{ fontSize:'10px', color:'#7c3aed' }}>+{fmt(e.ot_pay)}</div></div>
+                              ? <div>
+                                  <div style={{ fontSize:'11px', color:'#7c3aed', fontWeight:700 }}>{parseFloat(e.ot_hours).toFixed(1)}h</div>
+                                  <div style={{ fontSize:'10px', color:'#7c3aed' }}>+{fmt(e.ot_pay)}</div>
+                                </div>
                               : <span style={{ color:'#ddd' }}>—</span>}
                           </td>
-                          <td style={T}>
+
+                          <td style={TD}>
                             <span style={{ fontWeight:600, color:'#1d4ed8', fontSize:'13px' }}>{fmt(e.gross)}</span>
                             {hasLOP && <div style={{ fontSize:'10px', color:'#ea580c', marginTop:'2px' }}>LOP −{fmt(e.lop_deduction)}</div>}
                           </td>
-                          <td style={{ ...T, minWidth:'180px' }}>
-                            <DeductionPanel e={e} />
+
+                          <td style={{ ...TD, minWidth:'200px' }}>
+                            <DeductionPanel e={e} settings={settings} />
                           </td>
-                          <td style={T}>
+
+                          <td style={TD}>
                             <span style={{ fontWeight:800, fontSize:'14px', color: netZero ? '#dc2626' : '#16a34a' }}>{fmt(e.net_pay)}</span>
                             {netZero && <div style={{ fontSize:'9px', color:'#dc2626' }}>CHECK</div>}
                           </td>
-                          <td style={T}>
-                            <div style={{ display:'flex', gap:'5px', flexWrap:'wrap' }}>
+
+                          <td style={TD}>
+                            <div style={{ display:'flex', gap:'4px', flexWrap:'wrap' }}>
                               {detail.run.status !== 'locked' && can('process_payroll') && (
-                                <button onClick={ev => { ev.stopPropagation(); setAdjEntry(e); setAdjForm({type:'bonus',amount:'',reason:''}) }} style={BA}>+ Adj</button>
+                                <button onClick={ev => { ev.stopPropagation(); setAdjEntry(e); setAdjForm({type:'bonus',amount:'',reason:''}) }}
+                                  style={BA}>+ Adj</button>
                               )}
-                              <button onClick={ev => { ev.stopPropagation(); setExpandRow(isExp ? null : e.id) }} style={{ ...BA, background: isExp ? '#e0e7ff' : '#f3f4f6', color: isExp ? '#4f46e5' : '#555' }}>
+                              <button onClick={ev => { ev.stopPropagation(); setExpandRow(isExp ? null : e.id) }}
+                                style={{ ...BA, background: isExp ? '#e0e7ff' : '#f3f4f6', color: isExp ? '#4f46e5' : '#555' }}>
                                 {isExp ? '▲' : '▼'}
                               </button>
                             </div>
                           </td>
                         </tr>
 
-                        {/* Expanded breakdown */}
+                        {/* Expanded full breakdown */}
                         {isExp && (
                           <tr key={`${e.id}-x`} style={{ background:'#f0f9ff', borderTop:'1px solid #bfdbfe' }}>
-                            <td colSpan={7} style={{ padding:'16px 20px' }}>
-                              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:'16px' }}>
+                            <td colSpan={7} style={{ padding:'18px 22px' }}>
+                              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:'18px' }}>
 
                                 {/* Earnings */}
                                 <div>
                                   <p style={ST}>💰 Earnings Breakdown</p>
                                   {[
-                                    ['Basic',          e.basic],
-                                    ['HRA',            e.hra],
-                                    ['DA',             e.da],
-                                    ['Special Allow.', e.special_allowance],
-                                    ['Transport',      e.transport],
-                                    ['Medical',        e.medical],
-                                    ['Other',          e.other_allowance],
-                                    [`OT (${parseFloat(e.ot_hours||0).toFixed(1)}h)`, e.ot_pay, '#7c3aed'],
+                                    ['Basic',         e.basic],
+                                    ['HRA',           e.hra],
+                                    ['DA',            e.da],
+                                    ['Special Allow.',e.special_allowance],
+                                    ['Transport',     e.transport],
+                                    ['Medical',       e.medical],
+                                    ['Other',         e.other_allowance],
+                                    [`OT (${parseFloat(e.ot_hours||0).toFixed(1)}h × ${settings?.overtime_multiplier??1.5}×)`, e.ot_pay, '#7c3aed'],
                                   ].filter(r => n(r[1]) > 0).map(r => (
-                                    <div key={r[0]} style={{ display:'flex', justifyContent:'space-between', fontSize:'11px', padding:'2px 0' }}>
-                                      <span style={{ color: r[2] || '#777' }}>{r[0]}</span>
-                                      <span style={{ color: r[2] || '#333', fontWeight:500 }}>{fmt(r[1])}</span>
-                                    </div>
+                                    <Row key={r[0]} label={r[0]} value={fmt(r[1])} color={r[2]} />
                                   ))}
-                                  <div style={{ borderTop:'1px solid #e5e7eb', marginTop:'4px', paddingTop:'4px', display:'flex', justifyContent:'space-between', fontSize:'12px' }}>
-                                    <span style={{ fontWeight:700 }}>Gross</span>
-                                    <span style={{ fontWeight:700, color:'#1d4ed8' }}>{fmt(e.gross)}</span>
-                                  </div>
+                                  <Row label="Gross" value={fmt(e.gross)} bold color="#1d4ed8" />
                                 </div>
 
-                                {/* Deductions */}
+                                {/* Deductions with live % labels */}
                                 <div>
                                   <p style={ST}>📉 Deduction Breakdown</p>
-                                  <DeductionPanel e={e} />
+                                  {[
+                                    [`PF Employee (${settings?.pf_employee_percent??12}% of Basic, prorated by ${parseFloat(e.present_days).toFixed(1)}/${e.working_days} days)`, e.pf_employee, '#7c3aed'],
+                                    [n(e.esi_employee)>0
+                                      ? `ESI Employee (${settings?.esi_employee_percent??0.75}% of gross, prorated — gross ≤ ₹${n(settings?.esi_threshold??21000).toLocaleString('en-IN')})`
+                                      : 'ESI — Exempt (gross > ESI threshold)', e.esi_employee, '#2563eb'],
+                                    [`Professional Tax (slab on effective gross)`, e.pt, '#0891b2'],
+                                    [`TDS${e.employee_type==='contract' ? ` (${settings?.tds_flat_contract??10}% flat, contract)` : ' (income slab)'}`, e.tds, '#dc2626'],
+                                    [`LOP — ${parseFloat(e.lop_days).toFixed(1)} days × (Gross÷${e.working_days} days)`, e.lop_deduction, '#ea580c'],
+                                  ].filter(r => n(r[1]) > 0).map(r => (
+                                    <Row key={r[0]} label={r[0]} value={`−${fmt(r[1])}`} color={r[2]} />
+                                  ))}
+                                  <Row label="Total Deductions" value={`−${fmt(e.total_deductions)}`} bold color="#dc2626" />
                                 </div>
 
                                 {/* Net pay formula */}
                                 <div>
                                   <p style={ST}>🧮 Net Pay Formula</p>
-                                  <div style={{ fontSize:'12px', lineHeight:1.8 }}>
-                                    <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                      <span style={{ color:'#555' }}>Gross Earnings</span>
-                                      <span style={{ color:'#1d4ed8', fontWeight:600 }}>{fmt(e.gross)}</span>
-                                    </div>
-                                    {hasLOP && (
-                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                        <span style={{ color:'#ea580c' }}>LOP ({parseFloat(e.lop_days).toFixed(1)} days)</span>
-                                        <span style={{ color:'#ea580c', fontWeight:600 }}>−{fmt(e.lop_deduction)}</span>
-                                      </div>
-                                    )}
-                                    <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                      <span style={{ color:'#555' }}>PF (12% Basic, prorated)</span>
-                                      <span style={{ fontWeight:600 }}>−{fmt(e.pf_employee)}</span>
-                                    </div>
-                                    {n(e.esi_employee) > 0 && (
-                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                        <span style={{ color:'#555' }}>ESI (0.75%, prorated)</span>
-                                        <span style={{ fontWeight:600 }}>−{fmt(e.esi_employee)}</span>
-                                      </div>
-                                    )}
-                                    {n(e.pt) > 0 && (
-                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                        <span style={{ color:'#555' }}>Professional Tax</span>
-                                        <span style={{ fontWeight:600 }}>−{fmt(e.pt)}</span>
-                                      </div>
-                                    )}
-                                    {n(e.tds) > 0 && (
-                                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                                        <span style={{ color:'#dc2626' }}>TDS</span>
-                                        <span style={{ color:'#dc2626', fontWeight:600 }}>−{fmt(e.tds)}</span>
-                                      </div>
-                                    )}
-                                    <div style={{ borderTop:'1px dashed #cbd5e1', marginTop:'6px', paddingTop:'6px', display:'flex', justifyContent:'space-between' }}>
-                                      <span style={{ fontWeight:700 }}>Net Pay (Take Home)</span>
-                                      <span style={{ fontWeight:800, color:'#16a34a', fontSize:'14px' }}>{fmt(e.net_pay)}</span>
+                                  <div style={{ fontSize:'12px', lineHeight:2, background:'#fff', borderRadius:'8px', padding:'10px 12px', border:'1px solid #e5e7eb' }}>
+                                    <Row label="Gross Earnings"      value={fmt(e.gross)}            color="#1d4ed8" />
+                                    {hasLOP && <Row label={`LOP (${parseFloat(e.lop_days).toFixed(1)} days)`} value={`−${fmt(e.lop_deduction)}`} color="#ea580c" />}
+                                    {n(e.pf_employee)>0  && <Row label={`PF Emp (${settings?.pf_employee_percent??12}%)`}    value={`−${fmt(e.pf_employee)}`}  />}
+                                    {n(e.esi_employee)>0 && <Row label={`ESI Emp (${settings?.esi_employee_percent??0.75}%)`} value={`−${fmt(e.esi_employee)}`} />}
+                                    {n(e.pt)>0           && <Row label="PT"                           value={`−${fmt(e.pt)}`}              />}
+                                    {n(e.tds)>0          && <Row label="TDS"                          value={`−${fmt(e.tds)}`}             color="#dc2626" />}
+                                    <div style={{ borderTop:'2px dashed #cbd5e1', marginTop:'6px', paddingTop:'6px' }}>
+                                      <Row label="✅ Net Take Home" value={fmt(e.net_pay)} bold color="#16a34a" />
                                     </div>
                                   </div>
                                 </div>
@@ -388,14 +464,12 @@ export default function PayrollRuns() {
                                 {/* Adjustments */}
                                 {e.adjustments?.length > 0 && (
                                   <div>
-                                    <p style={ST}>⚙️ Adjustments</p>
+                                    <p style={ST}>⚙️ Manual Adjustments</p>
                                     {e.adjustments.map((adj, idx) => (
-                                      <div key={idx} style={{ display:'flex', justifyContent:'space-between', fontSize:'12px', padding:'3px 0', borderBottom:'1px solid #e5e7eb' }}>
-                                        <span style={{ color:'#555', textTransform:'capitalize' }}>{adj.type} — {adj.reason}</span>
-                                        <span style={{ color: adj.type==='deduction' ? '#dc2626' : '#16a34a', fontWeight:600 }}>
-                                          {adj.type==='deduction' ? '−' : '+'}{fmt(adj.amount)}
-                                        </span>
-                                      </div>
+                                      <Row key={idx}
+                                        label={`${adj.type.charAt(0).toUpperCase()+adj.type.slice(1)} — ${adj.reason}`}
+                                        value={`${adj.type==='deduction' ? '−' : '+'}${fmt(adj.amount)}`}
+                                        color={adj.type==='deduction' ? '#dc2626' : '#16a34a'} />
                                     ))}
                                   </div>
                                 )}
@@ -421,7 +495,7 @@ export default function PayrollRuns() {
             <p style={{ margin:'0 0 18px', fontSize:'12px', color:'#888' }}>{adjEntry.employee_name}</p>
 
             <label style={L}>Type</label>
-            <select value={adjForm.type} onChange={e => setAdjForm(p=>({...p,type:e.target.value}))} style={I}>
+            <select value={adjForm.type} onChange={e => setAdjForm(p=>({...p,type:e.target.value}))} style={INP}>
               <option value="bonus">🎁 Bonus</option>
               <option value="reimbursement">🧾 Reimbursement</option>
               <option value="arrear">📅 Arrear</option>
@@ -429,10 +503,10 @@ export default function PayrollRuns() {
             </select>
 
             <label style={{...L, marginTop:'12px'}}>Amount (₹)</label>
-            <input type="number" value={adjForm.amount} onChange={e => setAdjForm(p=>({...p,amount:e.target.value}))} style={I} placeholder="5000" />
+            <input type="number" value={adjForm.amount} onChange={e => setAdjForm(p=>({...p,amount:e.target.value}))} style={INP} placeholder="5000" />
 
             <label style={{...L, marginTop:'12px'}}>Reason</label>
-            <textarea value={adjForm.reason} onChange={e => setAdjForm(p=>({...p,reason:e.target.value}))} style={{...I, height:'70px', resize:'vertical'}} placeholder="e.g. Q1 performance bonus" />
+            <textarea value={adjForm.reason} onChange={e => setAdjForm(p=>({...p,reason:e.target.value}))} style={{...INP, height:'70px', resize:'vertical'}} placeholder="e.g. Q1 performance bonus" />
 
             <div style={{ display:'flex', gap:'10px', marginTop:'18px', justifyContent:'flex-end' }}>
               <button onClick={() => setAdjEntry(null)} style={{ padding:'9px 18px', background:'#f3f4f6', border:'none', borderRadius:'8px', fontSize:'13px', cursor:'pointer' }}>Cancel</button>
@@ -445,11 +519,18 @@ export default function PayrollRuns() {
   )
 }
 
-const C  = { background:'#fff', borderRadius:'12px', border:'1px solid #e5e7eb', padding:'18px 20px', marginBottom:'14px' }
-const S  = { padding:'8px 10px', borderRadius:'8px', border:'1px solid #ddd', fontSize:'13px', outline:'none' }
-const BP = { padding:'8px 16px', background:'#1a1a2e', color:'#fff', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:600, cursor:'pointer' }
-const BA = { padding:'4px 10px', background:'#eff6ff', color:'#1d4ed8', border:'none', borderRadius:'6px', fontSize:'11px', cursor:'pointer', fontWeight:600 }
-const T  = { padding:'10px 12px', color:'#333', verticalAlign:'top' }
-const L  = { fontSize:'12px', color:'#555', fontWeight:500, display:'block', marginBottom:'5px' }
-const I  = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1px solid #ddd', fontSize:'13px', outline:'none', boxSizing:'border-box', display:'block' }
-const ST = { margin:'0 0 8px', fontSize:'11px', fontWeight:700, color:'#888', textTransform:'uppercase', letterSpacing:'0.05em' }
+const Row = ({ label, value, bold, color }) => (
+  <div style={{ display:'flex', justifyContent:'space-between', fontSize:'12px', padding:'2px 0' }}>
+    <span style={{ color:'#777', paddingRight:'8px' }}>{label}</span>
+    <span style={{ fontWeight: bold ? 700 : 500, color: color || '#333', whiteSpace:'nowrap' }}>{value}</span>
+  </div>
+)
+
+const CARD = { background:'#fff', borderRadius:'12px', border:'1px solid #e5e7eb', padding:'18px 20px', marginBottom:'14px' }
+const SEL  = { padding:'8px 10px', borderRadius:'8px', border:'1px solid #ddd', fontSize:'13px', outline:'none' }
+const BP   = { padding:'8px 16px', background:'#1a1a2e', color:'#fff', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:600, cursor:'pointer' }
+const BA   = { padding:'4px 10px', background:'#eff6ff', color:'#1d4ed8', border:'none', borderRadius:'6px', fontSize:'11px', cursor:'pointer', fontWeight:600 }
+const TD   = { padding:'10px 12px', color:'#333', verticalAlign:'top' }
+const L    = { fontSize:'12px', color:'#555', fontWeight:500, display:'block', marginBottom:'5px' }
+const INP  = { width:'100%', padding:'9px 12px', borderRadius:'8px', border:'1px solid #ddd', fontSize:'13px', outline:'none', boxSizing:'border-box', display:'block' }
+const ST   = { margin:'0 0 8px', fontSize:'11px', fontWeight:700, color:'#888', textTransform:'uppercase', letterSpacing:'0.05em' }

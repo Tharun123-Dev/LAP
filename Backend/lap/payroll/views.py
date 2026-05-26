@@ -16,6 +16,41 @@ from .serializers import (
     PayrollEntrySerializer, AdjustmentSerializer
 )
 from .engine import process_payroll_run
+from attendance.settings_helper import (
+    get_basic_salary_percent, get_hra_metro_percent, get_hra_nonmetro_percent,
+    get_da_percent, get_pf_employee_percent, get_pf_employer_percent,
+    get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
+    get_payroll_lock_day, get_tds_flat_contract, get_pt_slabs,
+    get_overtime_multiplier,
+)
+
+
+# ── PAYROLL SETTINGS DEFAULTS (for salary config auto-fill) ───────────────────
+
+class PayrollSettingsDefaultsView(APIView):
+    """
+    Returns all current payroll system setting values.
+    Frontend SalaryConfig calls this to auto-fill the form when CTC is entered.
+    Changing any setting in System Settings immediately reflects here.
+    """
+    permission_classes = [IsAuthenticatedUser]
+
+    def get(self, request):
+        return Response({
+            'basic_percent':       float(get_basic_salary_percent()),
+            'hra_percent_metro':   float(get_hra_metro_percent()),
+            'hra_percent_nonmetro': float(get_hra_nonmetro_percent()),
+            'da_percent':          float(get_da_percent()),
+            'pf_employee_percent': float(get_pf_employee_percent()),
+            'pf_employer_percent': float(get_pf_employer_percent()),
+            'esi_employee_percent': float(get_esi_employee_percent()),
+            'esi_employer_percent': float(get_esi_employer_percent()),
+            'esi_threshold':       float(get_esi_threshold()),
+            'payroll_lock_day':    get_payroll_lock_day(),
+            'tds_flat_contract':   float(get_tds_flat_contract()),
+            'overtime_multiplier': float(get_overtime_multiplier()),
+            'pt_slabs':            get_pt_slabs(),
+        })
 
 
 # ── SALARY STRUCTURE ──────────────────────────────────────────────────────────
@@ -33,6 +68,8 @@ class SalaryStructureListView(APIView):
             qs = qs.filter(employee_id=emp_id)
 
         return Response(SalaryStructureSerializer(qs, many=True).data)
+
+
 class CreateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 
@@ -40,111 +77,72 @@ class CreateSalaryStructureView(APIView):
         emp_id = request.data.get('employee')
 
         if not emp_id:
-            return Response(
-                {'error': 'employee is required'},
-                status=400
-            )
+            return Response({'error': 'employee is required'}, status=400)
 
         try:
             emp = User.objects.get(pk=emp_id)
-
         except User.DoesNotExist:
-            return Response(
-                {'error': 'Employee not found'},
-                status=404
-            )
+            return Response({'error': 'Employee not found'}, status=404)
+
+        # Use system settings as defaults if not provided
         data = {
+            'employee':        emp.id,
+            'effective_date':  request.data.get('effective_date'),
+            'ctc':             request.data.get('ctc', 0),
+            'basic_percent':   request.data.get('basic_percent', float(get_basic_salary_percent())),
+            'hra_percent':     request.data.get('hra_percent', float(get_hra_metro_percent())),
+            'da_percent':      request.data.get('da_percent', float(get_da_percent())),
+            'pf_percent':      request.data.get('pf_percent', float(get_pf_employee_percent())),
+            'esi_percent':     request.data.get('esi_percent', float(get_esi_employee_percent())),
+            'transport':       request.data.get('transport', 1600),
+            'medical':         request.data.get('medical', 1250),
+            'other_allowance': request.data.get('other_allowance', 0),
+            'pt':              request.data.get('pt', 200),
+        }
 
-    'employee': emp.id,
-
-    'effective_date':
-        request.data.get('effective_date'),
-
-    'ctc':
-        request.data.get('ctc', 0),
-
-    'basic_percent':
-        request.data.get('basic_percent', 40),
-
-    'hra_percent':
-        request.data.get('hra_percent', 50),
-
-    'da_percent':
-        request.data.get('da_percent', 10),
-
-    'pf_percent':
-        request.data.get('pf_percent', 12),
-
-    'esi_percent':
-        request.data.get('esi_percent', 0.75),
-
-    'transport':
-        request.data.get('transport', 1600),
-
-    'medical':
-        request.data.get('medical', 1250),
-
-    'other_allowance':
-        request.data.get('other_allowance', 0),
-
-    'pt':
-        request.data.get('pt', 200),
-}
-
-        # ── CTC validation ─────────────────────────────
+        # CTC validation
         try:
             ctc    = Decimal(str(data.get('ctc', 0)))
-            basic  = Decimal(str(data.get('basic', 0)))
-            hra    = Decimal(str(data.get('hra', 0)))
-            da     = Decimal(str(data.get('da', 0)))
-            sp     = Decimal(str(data.get('special_allowance', 0)))
-            tr     = Decimal(str(data.get('transport', 0)))
-            med    = Decimal(str(data.get('medical', 0)))
-            oth    = Decimal(str(data.get('other_allowance', 0)))
+            basic_pct = Decimal(str(data.get('basic_percent', 40))) / Decimal('100')
+            hra_pct   = Decimal(str(data.get('hra_percent', 50)))   / Decimal('100')
+            da_pct    = Decimal(str(data.get('da_percent', 10)))    / Decimal('100')
+            tr        = Decimal(str(data.get('transport', 0)))
+            med       = Decimal(str(data.get('medical', 0)))
+            oth       = Decimal(str(data.get('other_allowance', 0)))
 
-            pf_er  = Decimal(str(data.get('pf_employer', 0)))
-            esi_er = Decimal(str(data.get('esi_employer', 0)))
+            monthly_ctc = ctc / Decimal('12')
+            basic  = monthly_ctc * basic_pct
+            hra    = basic * hra_pct
+            da     = basic * da_pct
+            pf_er  = basic * get_pf_employer_percent() / Decimal('100')
+            esi_er = (basic + hra + da + tr + med + oth) * get_esi_employer_percent() / Decimal('100')
 
-            gross_components = (
-                basic + hra + da + sp + tr + med + oth
-            )
-
-            total_ctc = gross_components + pf_er + esi_er
-
-            ctc_diff = abs(ctc - total_ctc)
-
+            gross_components = basic + hra + da + tr + med + oth
+            total_ctc_month  = gross_components + pf_er + esi_er
+            ctc_diff = abs(ctc / Decimal('12') - total_ctc_month)
             ctc_warning = None
-
-            if ctc > 0 and ctc_diff > Decimal('100'):
+            if ctc > 0 and ctc_diff > Decimal('500'):
                 ctc_warning = (
-                    f"CTC ₹{ctc} does not match "
-                    f"components total ₹{total_ctc}. "
-                    f"Difference: ₹{ctc_diff}"
+                    f"CTC ₹{ctc} — Monthly gross components ₹{round(total_ctc_month, 2)}. "
+                    f"Difference: ₹{round(ctc_diff, 2)} (employer contributions included)"
                 )
-
         except Exception:
             ctc_warning = None
 
-        # deactivate old structure
-        SalaryStructure.objects.filter(
-            employee=emp,
-            is_active=True
-        ).update(is_active=False)
+        # Deactivate old structure
+        SalaryStructure.objects.filter(employee=emp, is_active=True).update(is_active=False)
 
         serializer = SalaryStructureSerializer(data=data)
-
         if serializer.is_valid():
             obj = serializer.save(created_by=request.user)
-
-            resp = serializer.data
-
+            resp = dict(serializer.data)
             if ctc_warning:
-                resp = dict(resp)
                 resp['ctc_warning'] = ctc_warning
-
             return Response(resp, status=201)
 
         return Response(serializer.errors, status=400)
+
+
 class UpdateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 
@@ -160,7 +158,6 @@ class UpdateSalaryStructureView(APIView):
 
 
 class MySalaryStructureView(APIView):
-    """Employee views their own salary structure."""
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
@@ -172,6 +169,7 @@ class MySalaryStructureView(APIView):
             return Response(None, status=200)
 
         return Response(SalaryStructureSerializer(structure).data)
+
 
 # ── PAYROLL RUNS ──────────────────────────────────────────────────────────────
 
@@ -215,8 +213,24 @@ class ProcessPayrollRunView(APIView):
         if run.status == 'locked':
             return Response({'error': 'Payroll is locked and cannot be reprocessed'}, status=400)
 
+        # Enforce payroll lock day: can only process if today >= lock_day for that month
+        today     = date.today()
+        lock_day  = get_payroll_lock_day()
+        run_year  = run.year
+        run_month = run.month
+
+        # Allow processing for past months freely; for current month enforce lock day
+        is_current_month = (today.year == run_year and today.month == run_month)
+        if is_current_month and today.day < lock_day:
+            return Response({
+                'error': (
+                    f'Payroll for {run_month}/{run_year} can only be processed '
+                    f'on or after day {lock_day} of the month. '
+                    f'Today is {today.day}. Change payroll_lock_day in System Settings if needed.'
+                )
+            }, status=400)
+
         with transaction.atomic():
-            # Clear existing entries so they can be recalculated fresh
             if run.status == 'processed':
                 run.entries.all().delete()
 
@@ -226,15 +240,14 @@ class ProcessPayrollRunView(APIView):
             run.save()
 
         return Response({
-            'message':  f'Payroll processed for {run.month}/{run.year}',
-            'created':  len(created),
-            'skipped':  skipped,
-            'run':      PayrollRunSerializer(run).data,
+            'message': f'Payroll processed for {run.month}/{run.year}',
+            'created': len(created),
+            'skipped': skipped,
+            'run':     PayrollRunSerializer(run).data,
         })
 
 
 class ApprovePayrollRunView(APIView):
-    """Admin approves and locks payroll — no further changes after this."""
     permission_classes = [make_permission('approve_payroll')]
 
     def post(self, request, pk):
@@ -275,7 +288,6 @@ class PayrollRunDetailView(APIView):
 # ── PAYROLL ENTRY ─────────────────────────────────────────────────────────────
 
 class UpdatePayrollEntryView(APIView):
-    """Manual override for a single employee's entry before approval."""
     permission_classes = [make_permission('process_payroll')]
 
     def patch(self, request, pk):
@@ -291,8 +303,6 @@ class UpdatePayrollEntryView(APIView):
             if field in request.data:
                 setattr(entry, field, request.data[field])
 
-        # Recalculate totals.
-        # Gross = full earnings (LOP is a deduction, NOT baked into gross).
         entry.gross = (
             entry.basic + entry.hra + entry.da +
             entry.special_allowance + entry.transport +
@@ -334,11 +344,10 @@ class AddAdjustmentView(APIView):
             added_by      = request.user,
         )
 
-        # Apply adjustment to net_pay
         if adj_type in ['bonus', 'reimbursement', 'arrear']:
             entry.net_pay += amount
             entry.gross   += amount
-        else:  # deduction
+        else:
             entry.net_pay          = max(entry.net_pay - amount, Decimal('0'))
             entry.total_deductions += amount
         entry.save()
@@ -381,7 +390,6 @@ class MyPayslipDetailView(APIView):
 # ── PAYROLL REGISTER (Admin/HR) ───────────────────────────────────────────────
 
 class PayrollRegisterView(APIView):
-    """Summary for all employees in a run — used for bank transfer file."""
     permission_classes = [make_permission('view_payroll')]
 
     def get(self, request, pk):
@@ -404,24 +412,24 @@ class PayrollRegisterView(APIView):
                 emp_code     = ''
 
             data.append({
-                'emp_code':     emp_code,
-                'name':         e.employee.get_full_name(),
-                'bank_account': bank_account,
-                'ifsc':         ifsc,
-                'net_pay':      float(e.net_pay),
-                'gross':        float(e.gross),
+                'emp_code':         emp_code,
+                'name':             e.employee.get_full_name(),
+                'bank_account':     bank_account,
+                'ifsc':             ifsc,
+                'net_pay':          float(e.net_pay),
+                'gross':            float(e.gross),
                 'total_deductions': float(e.total_deductions),
-                'lop_days':     float(e.lop_days),
-                'present_days': float(e.present_days),
+                'lop_days':         float(e.lop_days),
+                'present_days':     float(e.present_days),
             })
 
         summary = {
-            'total_gross':   float(sum(e.gross for e in entries)),
-            'total_net':     float(sum(e.net_pay for e in entries)),
-            'total_pf':      float(sum(e.pf_employee for e in entries)),
-            'total_esi':     float(sum(e.esi_employee for e in entries)),
-            'total_tds':     float(sum(e.tds for e in entries)),
-            'total_lop':     float(sum(e.lop_deduction for e in entries)),
+            'total_gross':    float(sum(e.gross for e in entries)),
+            'total_net':      float(sum(e.net_pay for e in entries)),
+            'total_pf':       float(sum(e.pf_employee for e in entries)),
+            'total_esi':      float(sum(e.esi_employee for e in entries)),
+            'total_tds':      float(sum(e.tds for e in entries)),
+            'total_lop':      float(sum(e.lop_deduction for e in entries)),
             'employee_count': entries.count(),
         }
 
@@ -430,24 +438,20 @@ class PayrollRegisterView(APIView):
             'summary': summary,
             'entries': data,
         })
-# Add these new views at the bottom of payroll/views.py
+
 
 # ── DEDUCTION HISTORY — MY OWN ────────────────────────────────────────────────
 
 class MyDeductionHistoryView(APIView):
-    """
-    Employee sees their own deduction history across all months.
-    Shows every deduction type per month with totals.
-    """
     permission_classes = [make_permission('view_payslip')]
 
     def get(self, request):
         year = request.query_params.get('year', date.today().year)
 
         entries = PayrollEntry.objects.filter(
-            employee             = request.user,
-            payroll_run__status  = 'locked',
-            payroll_run__year    = year,
+            employee            = request.user,
+            payroll_run__status = 'locked',
+            payroll_run__year   = year,
         ).select_related('payroll_run').order_by(
             'payroll_run__year', 'payroll_run__month'
         )
@@ -456,47 +460,43 @@ class MyDeductionHistoryView(APIView):
         for e in entries:
             run = e.payroll_run
             history.append({
-                'month':          run.month,
-                'year':           run.year,
-                'gross':          float(e.gross),
-                'present_days':   float(e.present_days),
-                'working_days':   int(e.working_days),
-                'lop_days':       float(e.lop_days),
-                'ot_hours':       float(e.ot_hours),
-                'ot_pay':         float(e.ot_pay),
-                # Every deduction broken out
-                'pf_employee':    float(e.pf_employee),
-                'esi_employee':   float(e.esi_employee),
-                'pt':             float(e.pt),
-                'tds':            float(e.tds),
-                'lop_deduction':  float(e.lop_deduction),
+                'month':            run.month,
+                'year':             run.year,
+                'gross':            float(e.gross),
+                'present_days':     float(e.present_days),
+                'working_days':     int(e.working_days),
+                'lop_days':         float(e.lop_days),
+                'ot_hours':         float(e.ot_hours),
+                'ot_pay':           float(e.ot_pay),
+                'basic':            float(e.basic),
+                'hra':              float(e.hra),
+                'da':               float(e.da),
+                'pf_employee':      float(e.pf_employee),
+                'esi_employee':     float(e.esi_employee),
+                'pt':               float(e.pt),
+                'tds':              float(e.tds),
+                'lop_deduction':    float(e.lop_deduction),
                 'total_deductions': float(e.total_deductions),
-                'net_pay':        float(e.net_pay),
-                # Adjustments
+                'net_pay':          float(e.net_pay),
                 'adjustments': [
-                    {
-                        'type':   adj.type,
-                        'amount': float(adj.amount),
-                        'reason': adj.reason,
-                    }
+                    {'type': adj.type, 'amount': float(adj.amount), 'reason': adj.reason}
                     for adj in e.adjustments.all()
                 ],
             })
 
-        # YTD totals
         ytd = {
-            'gross':           sum(h['gross']           for h in history),
-            'net_pay':         sum(h['net_pay']         for h in history),
-            'pf_employee':     sum(h['pf_employee']     for h in history),
-            'esi_employee':    sum(h['esi_employee']    for h in history),
-            'pt':              sum(h['pt']              for h in history),
-            'tds':             sum(h['tds']             for h in history),
-            'lop_deduction':   sum(h['lop_deduction']   for h in history),
-            'total_deductions':sum(h['total_deductions']for h in history),
-            'lop_days':        sum(h['lop_days']        for h in history),
-            'ot_hours':        sum(h['ot_hours']        for h in history),
-            'ot_pay':          sum(h['ot_pay']          for h in history),
-            'months_paid':     len(history),
+            'gross':            sum(h['gross']            for h in history),
+            'net_pay':          sum(h['net_pay']          for h in history),
+            'pf_employee':      sum(h['pf_employee']      for h in history),
+            'esi_employee':     sum(h['esi_employee']      for h in history),
+            'pt':               sum(h['pt']               for h in history),
+            'tds':              sum(h['tds']              for h in history),
+            'lop_deduction':    sum(h['lop_deduction']    for h in history),
+            'total_deductions': sum(h['total_deductions'] for h in history),
+            'lop_days':         sum(h['lop_days']         for h in history),
+            'ot_hours':         sum(h['ot_hours']         for h in history),
+            'ot_pay':           sum(h['ot_pay']           for h in history),
+            'months_paid':      len(history),
         }
 
         return Response({'year': year, 'ytd': ytd, 'history': history})
@@ -505,10 +505,6 @@ class MyDeductionHistoryView(APIView):
 # ── DEDUCTION HISTORY — BY EMPLOYEE (Admin/HR) ────────────────────────────────
 
 class EmployeeDeductionHistoryView(APIView):
-    """
-    Admin/HR sees any employee's full deduction history.
-    Also supports comparing multiple employees side by side.
-    """
     permission_classes = [make_permission('view_payroll')]
 
     def get(self, request, emp_id):
@@ -531,28 +527,27 @@ class EmployeeDeductionHistoryView(APIView):
         for e in entries:
             run = e.payroll_run
             history.append({
-                'entry_id':      e.id,
-                'month':         run.month,
-                'year':          run.year,
-                'gross':         float(e.gross),
-                'present_days':  float(e.present_days),
-                'working_days':  int(e.working_days),
-                'lop_days':      float(e.lop_days),
-                'ot_hours':      float(e.ot_hours),
-                'ot_pay':        float(e.ot_pay),
-                'pf_employee':   float(e.pf_employee),
-                'esi_employee':  float(e.esi_employee),
-                'pt':            float(e.pt),
-                'tds':           float(e.tds),
-                'lop_deduction': float(e.lop_deduction),
+                'entry_id':         e.id,
+                'month':            run.month,
+                'year':             run.year,
+                'gross':            float(e.gross),
+                'present_days':     float(e.present_days),
+                'working_days':     int(e.working_days),
+                'lop_days':         float(e.lop_days),
+                'ot_hours':         float(e.ot_hours),
+                'ot_pay':           float(e.ot_pay),
+                'basic':            float(e.basic),
+                'hra':              float(e.hra),
+                'da':               float(e.da),
+                'pf_employee':      float(e.pf_employee),
+                'esi_employee':     float(e.esi_employee),
+                'pt':               float(e.pt),
+                'tds':              float(e.tds),
+                'lop_deduction':    float(e.lop_deduction),
                 'total_deductions': float(e.total_deductions),
-                'net_pay':       float(e.net_pay),
+                'net_pay':          float(e.net_pay),
                 'adjustments': [
-                    {
-                        'type':   adj.type,
-                        'amount': float(adj.amount),
-                        'reason': adj.reason,
-                    }
+                    {'type': adj.type, 'amount': float(adj.amount), 'reason': adj.reason}
                     for adj in e.adjustments.all()
                 ],
             })
@@ -590,10 +585,6 @@ class EmployeeDeductionHistoryView(APIView):
 # ── ALL EMPLOYEES DEDUCTION SUMMARY (Admin/HR) ────────────────────────────────
 
 class AllDeductionSummaryView(APIView):
-    """
-    Admin/HR dashboard — summary of all employees' deductions
-    for a given month/year. Good for spotting high LOP, TDS anomalies.
-    """
     permission_classes = [make_permission('view_payroll')]
 
     def get(self, request):
@@ -605,45 +596,44 @@ class AllDeductionSummaryView(APIView):
             payroll_run__year   = year,
             payroll_run__status = 'locked',
         ).select_related(
-            'employee',
-            'employee__profile',
-            'employee__profile__department',
+            'employee', 'employee__profile', 'employee__profile__department',
         ).order_by('employee__first_name')
 
         data = []
         for e in entries:
             try:
                 emp_code = e.employee.profile.emp_code
-                dept     = e.employee.profile.department.name \
-                           if e.employee.profile.department else '—'
+                dept     = e.employee.profile.department.name if e.employee.profile.department else '—'
             except Exception:
                 emp_code = ''
                 dept     = '—'
 
             data.append({
-                'emp_id':        e.employee.id,
-                'emp_code':      emp_code,
-                'name':          e.employee.get_full_name() or e.employee.username,
-                'department':    dept,
-                'present_days':  float(e.present_days),
-                'working_days':  int(e.working_days),
-                'lop_days':      float(e.lop_days),
-                'ot_hours':      float(e.ot_hours),
-                'gross':         float(e.gross),
-                'pf_employee':   float(e.pf_employee),
-                'esi_employee':  float(e.esi_employee),
-                'pt':            float(e.pt),
-                'tds':           float(e.tds),
-                'lop_deduction': float(e.lop_deduction),
+                'emp_id':           e.employee.id,
+                'emp_code':         emp_code,
+                'name':             e.employee.get_full_name() or e.employee.username,
+                'department':       dept,
+                'present_days':     float(e.present_days),
+                'working_days':     int(e.working_days),
+                'lop_days':         float(e.lop_days),
+                'ot_hours':         float(e.ot_hours),
+                'gross':            float(e.gross),
+                'basic':            float(e.basic),
+                'hra':              float(e.hra),
+                'da':               float(e.da),
+                'pf_employee':      float(e.pf_employee),
+                'esi_employee':     float(e.esi_employee),
+                'pt':               float(e.pt),
+                'tds':              float(e.tds),
+                'lop_deduction':    float(e.lop_deduction),
                 'total_deductions': float(e.total_deductions),
-                'net_pay':       float(e.net_pay),
-                'has_lop':       e.lop_days > 0,
-                'has_ot':        e.ot_hours > 0,
+                'net_pay':          float(e.net_pay),
+                'has_lop':          e.lop_days > 0,
+                'has_ot':           e.ot_hours > 0,
             })
 
-        # Org summary
         summary = {
-            'total_employees':   len(data),
+            'total_employees':    len(data),
             'employees_with_lop': sum(1 for d in data if d['has_lop']),
             'employees_with_ot':  sum(1 for d in data if d['has_ot']),
             'total_gross':        sum(d['gross']            for d in data),
@@ -664,14 +654,9 @@ class AllDeductionSummaryView(APIView):
         })
 
 
-# ── DASHBOARD STATS API ───────────────────────────────────────────────────────
+# ── DASHBOARD STATS ───────────────────────────────────────────────────────────
 
 class DashboardStatsView(APIView):
-    """
-    Returns role-appropriate stats for the dashboard home.
-    Employee: their own attendance + leave + last payslip
-    Admin/HR: org-wide headcount + payroll + leave stats
-    """
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
@@ -693,7 +678,6 @@ class DashboardStatsView(APIView):
         from attendance.models import AttendanceRecord
         from leave.models import LeaveRequest, LeaveBalance
 
-        # This month attendance
         att = AttendanceRecord.objects.filter(
             employee    = request.user,
             date__year  = today.year,
@@ -701,28 +685,19 @@ class DashboardStatsView(APIView):
         )
         present = att.filter(status__in=['present', 'late']).count()
         absent  = att.filter(status='absent').count()
-        lop     = att.filter(status='absent').count() + \
-                  att.filter(status='half_day').count() * 0.5
-
-        # Today
+        lop     = att.filter(status='absent').count() + att.filter(status='half_day').count() * 0.5
         today_att = att.filter(date=today).first()
 
-        # Leave balances
         balances = LeaveBalance.objects.filter(
-            employee = request.user,
-            year     = today.year,
+            employee=request.user, year=today.year,
         ).select_related('leave_type')
 
-        # Pending leave requests
         pending_leaves = LeaveRequest.objects.filter(
-            employee = request.user,
-            status   = 'pending',
+            employee=request.user, status='pending',
         ).count()
 
-        # Last payslip
         last_payslip = PayrollEntry.objects.filter(
-            employee            = request.user,
-            payroll_run__status = 'locked',
+            employee=request.user, payroll_run__status='locked',
         ).select_related('payroll_run').order_by(
             '-payroll_run__year', '-payroll_run__month'
         ).first()
@@ -750,15 +725,15 @@ class DashboardStatsView(APIView):
                 ],
             },
             'last_payslip': {
-                'month':             last_payslip.payroll_run.month if last_payslip else None,
-                'year':              last_payslip.payroll_run.year  if last_payslip else None,
-                'net_pay':           float(last_payslip.net_pay)          if last_payslip else 0,
-                'gross':             float(last_payslip.gross)            if last_payslip else 0,
-                'lop_days':          float(last_payslip.lop_days)         if last_payslip else 0,
-                'lop_deduction':     float(last_payslip.lop_deduction)    if last_payslip else 0,
-                'pf':                float(last_payslip.pf_employee)      if last_payslip else 0,
-                'tds':               float(last_payslip.tds)              if last_payslip else 0,
-                'total_deductions':  float(last_payslip.total_deductions) if last_payslip else 0,
+                'month':            last_payslip.payroll_run.month if last_payslip else None,
+                'year':             last_payslip.payroll_run.year  if last_payslip else None,
+                'net_pay':          float(last_payslip.net_pay)          if last_payslip else 0,
+                'gross':            float(last_payslip.gross)            if last_payslip else 0,
+                'lop_days':         float(last_payslip.lop_days)         if last_payslip else 0,
+                'lop_deduction':    float(last_payslip.lop_deduction)    if last_payslip else 0,
+                'pf':               float(last_payslip.pf_employee)      if last_payslip else 0,
+                'tds':              float(last_payslip.tds)              if last_payslip else 0,
+                'total_deductions': float(last_payslip.total_deductions) if last_payslip else 0,
             },
         })
 
@@ -767,20 +742,13 @@ class DashboardStatsView(APIView):
         from attendance.models import AttendanceRecord
         from leave.models import LeaveRequest
 
-        total_emp   = User.objects.filter(is_active=True).count()
-        total_dept  = EmployeeProfile.objects.values(
-            'department'
-        ).distinct().count()
-
-        today_att   = AttendanceRecord.objects.filter(date=today)
-        checked_in  = today_att.filter(check_in__isnull=False).count()
-
+        total_emp  = User.objects.filter(is_active=True).count()
+        total_dept = EmployeeProfile.objects.values('department').distinct().count()
+        today_att  = AttendanceRecord.objects.filter(date=today)
+        checked_in = today_att.filter(check_in__isnull=False).count()
         pending_leaves = LeaveRequest.objects.filter(status='pending').count()
 
-        last_run = PayrollRun.objects.order_by(
-            '-year', '-month'
-        ).first()
-
+        last_run = PayrollRun.objects.order_by('-year', '-month').first()
         last_run_data = None
         if last_run:
             entries = PayrollEntry.objects.filter(payroll_run=last_run)
@@ -788,24 +756,22 @@ class DashboardStatsView(APIView):
                 'month':          last_run.month,
                 'year':           last_run.year,
                 'status':         last_run.status,
-                'total_net':      float(sum(e.net_pay         for e in entries)),
-                'total_gross':    float(sum(e.gross           for e in entries)),
-                'total_pf':       float(sum(e.pf_employee     for e in entries)),
-                'total_tds':      float(sum(e.tds             for e in entries)),
-                'total_lop':      float(sum(e.lop_deduction   for e in entries)),
-                'employees_paid': entries.filter(
-                    payroll_run__status='locked'
-                ).count(),
+                'total_net':      float(sum(e.net_pay       for e in entries)),
+                'total_gross':    float(sum(e.gross         for e in entries)),
+                'total_pf':       float(sum(e.pf_employee   for e in entries)),
+                'total_tds':      float(sum(e.tds           for e in entries)),
+                'total_lop':      float(sum(e.lop_deduction for e in entries)),
+                'employees_paid': entries.filter(payroll_run__status='locked').count(),
                 'employees_lop':  entries.filter(lop_days__gt=0).count(),
             }
 
         return Response({
             'role': 'admin',
             'headcount': {
-                'total_employees':    total_emp,
-                'total_departments':  total_dept,
-                'checked_in_today':   checked_in,
-                'pending_leaves':     pending_leaves,
+                'total_employees':   total_emp,
+                'total_departments': total_dept,
+                'checked_in_today':  checked_in,
+                'pending_leaves':    pending_leaves,
             },
             'last_payroll': last_run_data,
         })
@@ -814,28 +780,18 @@ class DashboardStatsView(APIView):
         from attendance.models import AttendanceRecord
         from leave.models import LeaveRequest
 
-        # Manager's team — employees where manager = request.user
-        team_ids = User.objects.filter(
-            profile__manager = request.user
-        ).values_list('id', flat=True)
-
-        today_att  = AttendanceRecord.objects.filter(
-            date=today, employee_id__in=team_ids
-        )
+        team_ids   = User.objects.filter(profile__manager=request.user).values_list('id', flat=True)
+        today_att  = AttendanceRecord.objects.filter(date=today, employee_id__in=team_ids)
         checked_in = today_att.filter(check_in__isnull=False).count()
         absent     = len(team_ids) - checked_in
-
-        pending = LeaveRequest.objects.filter(
-            employee_id__in = team_ids,
-            status          = 'pending',
-        ).count()
+        pending    = LeaveRequest.objects.filter(employee_id__in=team_ids, status='pending').count()
 
         return Response({
             'role': 'manager',
             'team': {
-                'total':           len(team_ids),
+                'total':            len(team_ids),
                 'checked_in_today': checked_in,
-                'absent_today':    absent,
-                'pending_leaves':  pending,
+                'absent_today':     absent,
+                'pending_leaves':   pending,
             },
         })
