@@ -224,3 +224,21 @@ def get_fiscal_year_start_month() -> int:
 
 def get_probation_months() -> int:
     return int(_get('probation_period_months', 6))
+
+
+def get_cl_advance_notice_days() -> int:
+    """Advance notice days required for Casual Leave — from System Settings."""
+    return int(_get('cl_advance_notice_days', 0))
+
+
+def get_leave_advance_notice_days(leave_code: str) -> int:
+    """
+    Returns the advance notice days for any leave type code.
+    Currently reads cl_advance_notice_days for CL.
+    Falls back to 0 (no restriction) for other types.
+    """
+    code = (leave_code or '').upper()
+    if code == 'CL':
+        return get_cl_advance_notice_days()
+    # Future: add SL, EL keys here
+    return 0

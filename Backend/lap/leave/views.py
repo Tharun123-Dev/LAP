@@ -126,12 +126,16 @@ class ApplyLeaveView(APIView):
         except LeaveType.DoesNotExist:
             return Response({'error': 'Leave type not found'}, status=404)
 
-        # Notice period check (uses working days)
-        if lt.min_notice_days > 0:
+        # Notice period check — reads SystemSetting first, falls back to LeaveType.min_notice_days
+        from attendance.settings_helper import get_leave_advance_notice_days
+        system_notice = get_leave_advance_notice_days(lt.code)
+        effective_notice = system_notice if system_notice > 0 else lt.min_notice_days
+        if effective_notice > 0:
             notice_days = count_working_days(date.today(), start)
-            if notice_days < lt.min_notice_days:
+            if notice_days < effective_notice:
                 return Response({
-                    'error': f'{lt.name} requires {lt.min_notice_days} working day(s) advance notice'
+                    'error': f'{lt.name} requires {effective_notice} working day(s) advance notice. '
+                             f'Please apply at least {effective_notice} working day(s) before the leave date.'
                 }, status=400)
 
         # Calculate days using settings-aware count

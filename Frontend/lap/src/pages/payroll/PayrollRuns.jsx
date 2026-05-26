@@ -52,7 +52,7 @@ function SettingsPanel({ settings }) {
   if (!settings) return null
   const find = key => settings.find(s => s.key === key)?.value
   const items = [
-    { label:'Work Days/Week',    value: find('work_days_per_week')    || '5',    color:'#1d4ed8' },
+    // { label:'Work Days/Week',    value: find('work_days_per_week')    || '5',    color:'#1d4ed8' },
     { label:'Weekend Off',       value: (() => { try { const w = JSON.parse(find('weekend_days') || '["saturday","sunday"]'); return w.map(d=>d[0].toUpperCase()+d.slice(1)).join(', ') } catch { return 'Sat, Sun' } })(), color:'#0369a1' },
     { label:'PF Employee %',     value: (find('pf_employee_percent')  || '12') + '%', color:'#7c3aed' },
     { label:'ESI Employee %',    value: (find('esi_employee_percent') || '0.75') + '%', color:'#2563eb' },

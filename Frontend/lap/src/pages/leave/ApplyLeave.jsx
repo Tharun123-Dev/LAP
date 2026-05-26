@@ -1,6 +1,5 @@
-// src/pages/leave/ApplyLeave.jsx — FULL REPLACEMENT
-// Day count uses weekend_days setting. Half-day toggle from settings.
-// Shows current year + carry-forward balance clearly per type.
+'JSXEOF'
+// src/pages/leave/ApplyLeave.jsx
 import { useEffect, useState } from 'react'
 import { getLeaveTypesApi, applyLeaveApi, getMyBalanceApi } from '../../api/services/leave'
 import systemSettingsService from '../../api/services/systemsettings'
@@ -9,15 +8,17 @@ import toast from 'react-hot-toast'
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
 
 export default function ApplyLeave({ onApplied }) {
-  const [types,       setTypes]       = useState([])
-  const [balance,     setBalance]     = useState([])
-  const [saving,      setSaving]      = useState(false)
-  const [form,        setForm]        = useState({ leave_type: '', start_date: '', end_date: '', session: 'full', reason: '', doc_url: '' })
-  const [days,        setDays]        = useState(0)
-  const [weekendDays, setWeekendDays] = useState(['saturday','sunday'])
+  const [types,          setTypes]          = useState([])
+  const [balance,        setBalance]        = useState([])
+  const [saving,         setSaving]         = useState(false)
+  const [form,           setForm]           = useState({ leave_type: '', start_date: '', end_date: '', session: 'full', reason: '', doc_url: '' })
+  const [days,           setDays]           = useState(0)
+  const [weekendDays,    setWeekendDays]    = useState(['saturday','sunday'])
   const [halfDayEnabled, setHalfDayEnabled] = useState(true)
-  const [clMonthCap,  setClMonthCap]  = useState(0)
-  const [slDocDays,   setSlDocDays]   = useState(2)
+  const [clMonthCap,     setClMonthCap]     = useState(0)
+  const [slDocDays,      setSlDocDays]      = useState(2)
+  // ── advance notice per leave code — loaded from SystemSettings ──────────────
+  const [advanceNoticeDays, setAdvanceNoticeDays] = useState({}) // { CL: 2, SL: 0, ... }
 
   useEffect(() => {
     getLeaveTypesApi().then(r => setTypes(r.data)).catch(() => {})
@@ -38,10 +39,28 @@ export default function ApplyLeave({ onApplied }) {
 
       const slDoc = find('sl_doc_required_after_days')
       if (slDoc) setSlDocDays(parseInt(slDoc.value) || 2)
+
+      // ── Read advance notice days per leave type ──────────────────────────
+      const clNotice = find('cl_advance_notice_days')
+      setAdvanceNoticeDays(prev => ({
+        ...prev,
+        CL: clNotice ? (parseInt(clNotice.value) || 0) : 0,
+      }))
     }).catch(() => {})
   }, [])
 
   const isWorkingDay = (d) => !weekendDays.includes(DAY_NAMES[d.getDay()])
+
+  // Count working days between two dates (inclusive)
+  const countWorkingDays = (from, to) => {
+    let count = 0
+    const cur = new Date(from)
+    while (cur <= to) {
+      if (isWorkingDay(cur)) count++
+      cur.setDate(cur.getDate() + 1)
+    }
+    return count
+  }
 
   // Recalculate days whenever dates / session / weekendDays change
   useEffect(() => {
@@ -49,16 +68,8 @@ export default function ApplyLeave({ onApplied }) {
     const start = new Date(form.start_date)
     const end   = new Date(form.end_date)
     if (end < start) { setDays(0); return }
-
     if (form.session !== 'full') { setDays(0.5); return }
-
-    let count = 0
-    const cur = new Date(start)
-    while (cur <= end) {
-      if (isWorkingDay(cur)) count++
-      cur.setDate(cur.getDate() + 1)
-    }
-    setDays(count)
+    setDays(countWorkingDays(start, end))
   }, [form.start_date, form.end_date, form.session, weekendDays])
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
@@ -73,6 +84,30 @@ export default function ApplyLeave({ onApplied }) {
   const needsDoc    = selectedType?.code === 'SL' && days > slDocDays
   const isClOverCap = selectedType?.code === 'CL' && clMonthCap > 0
 
+  // ── Advance notice validation ─────────────────────────────────────────────
+  const getAdvanceNoticeRequired = () => {
+    if (!selectedType) return 0
+    // System Settings takes priority over LeaveType.min_notice_days
+    const fromSettings = advanceNoticeDays[selectedType.code] ?? 0
+    return fromSettings > 0 ? fromSettings : (selectedType.min_notice_days || 0)
+  }
+
+  const advanceNoticeRequired = getAdvanceNoticeRequired()
+
+  const getNoticeDaysFromToday = () => {
+    if (!form.start_date) return null
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const start = new Date(form.start_date)
+    if (start <= today) return 0
+    return countWorkingDays(today, start) - 1 // exclude start date itself
+  }
+
+  const noticeDaysFromToday   = getNoticeDaysFromToday()
+  const noticeViolation       = advanceNoticeRequired > 0 &&
+                                noticeDaysFromToday !== null &&
+                                noticeDaysFromToday < advanceNoticeRequired
+
   const handleSubmit = async () => {
     if (!form.leave_type || !form.start_date || !form.end_date || !form.reason.trim()) {
       toast.error('Please fill all required fields')
@@ -83,6 +118,10 @@ export default function ApplyLeave({ onApplied }) {
       return
     }
     if (insufficient) { toast.error('Insufficient leave balance'); return }
+    if (noticeViolation) {
+      toast.error(`${selectedType.name} requires ${advanceNoticeRequired} working day(s) advance notice.`)
+      return
+    }
 
     setSaving(true)
     try {
@@ -95,6 +134,8 @@ export default function ApplyLeave({ onApplied }) {
       setSaving(false)
     }
   }
+
+  const submitDisabled = saving || insufficient || !form.leave_type || noticeViolation
 
   return (
     <div style={{ maxWidth: '600px' }}>
@@ -112,6 +153,22 @@ export default function ApplyLeave({ onApplied }) {
             ))}
           </select>
         </div>
+
+        {/* Advance notice info banner — shown when a type is selected with notice requirement */}
+        {selectedType && advanceNoticeRequired > 0 && (
+          <div style={{
+            padding: '10px 14px',
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            color: '#1d4ed8',
+            fontWeight: 500,
+          }}>
+            ℹ️ <strong>{selectedType.name}</strong> requires <strong>{advanceNoticeRequired} working day(s)</strong> advance notice before the leave date.
+          </div>
+        )}
 
         {/* Balance card for selected type */}
         {selectedBal && (
@@ -150,6 +207,24 @@ export default function ApplyLeave({ onApplied }) {
             <input type="date" value={form.end_date} min={form.start_date} onChange={set('end_date')} style={inp} />
           </div>
         </div>
+
+        {/* Advance notice violation warning */}
+        {noticeViolation && form.start_date && (
+          <div style={{
+            padding: '10px 14px',
+            background: '#fee2e2',
+            border: '1px solid #fca5a5',
+            borderRadius: '8px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            color: '#dc2626',
+            fontWeight: 500,
+          }}>
+            🚫 <strong>{selectedType?.name}</strong> requires <strong>{advanceNoticeRequired} working day(s)</strong> advance notice.
+            {' '}You have only <strong>{noticeDaysFromToday} working day(s)</strong> before this date.
+            {' '}Please select a date at least <strong>{advanceNoticeRequired} working day(s)</strong> from today.
+          </div>
+        )}
 
         {/* Session — only if half day enabled in settings */}
         {halfDayEnabled && (
@@ -228,12 +303,14 @@ export default function ApplyLeave({ onApplied }) {
         )}
 
         <button
-          onClick={handleSubmit} disabled={saving || insufficient || !form.leave_type}
+          onClick={handleSubmit}
+          disabled={submitDisabled}
           style={{
             width: '100%', padding: '12px', borderRadius: '10px', border: 'none',
-            background: saving || insufficient || !form.leave_type ? '#e5e7eb' : '#1a1a2e',
-            color: saving || insufficient || !form.leave_type ? '#9ca3af' : '#fff',
-            fontSize: '14px', fontWeight: 700, cursor: saving || insufficient || !form.leave_type ? 'not-allowed' : 'pointer',
+            background: submitDisabled ? '#e5e7eb' : '#1a1a2e',
+            color: submitDisabled ? '#9ca3af' : '#fff',
+            fontSize: '14px', fontWeight: 700,
+            cursor: submitDisabled ? 'not-allowed' : 'pointer',
           }}
         >
           {saving ? 'Submitting…' : 'Submit Leave Request'}

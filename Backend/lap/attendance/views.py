@@ -9,11 +9,12 @@ from rest_framework import status, generics
 
 from utils.permissions import make_permission, IsAuthenticatedUser
 from accounts.models import User
-from .models import AttendanceRecord, AttendanceRegularization, Holiday
+from .models import AttendanceRecord, AttendanceRegularization, Holiday, OfficeLocation
 from .serializers import (
     AttendanceRecordSerializer,
     RegularizationSerializer,
     HolidaySerializer,
+    OfficeLocationSerializer,
 )
 from .settings_helper import (
     get_shift_start,
@@ -47,6 +48,88 @@ def _get_status(check_in, check_out, hours_worked):
     return 'present'
 
 
+def _validate_location(lat, lon):
+    """
+    Check whether the given GPS point is within the allowed radius of the
+    active office location.
+
+    Returns (ok: bool, distance_m: float, office: OfficeLocation | None, error_msg: str | None)
+    """
+    office = OfficeLocation.active()
+
+    # If no office location is configured → allow (don't block employees)
+    if office is None:
+        return True, None, None, None
+
+    if lat is None or lon is None:
+        return False, None, office, 'Location is required for check-in/check-out. Please allow location access.'
+
+    try:
+        distance_m = office.distance_from(float(lat), float(lon))
+    except (ValueError, TypeError):
+        return False, None, office, 'Invalid location data sent.'
+
+    if distance_m > office.radius_meters:
+        return (
+            False,
+            round(distance_m, 1),
+            office,
+            f'You are {round(distance_m, 0):.0f} m away from the office. '
+            f'Check-in is only allowed within {office.radius_meters} m.'
+        )
+
+    return True, round(distance_m, 1), office, None
+
+
+# ── OFFICE LOCATION (admin CRUD) ──────────────────────────────────────────────
+
+class OfficeLocationView(APIView):
+    """
+    GET  /attendance/office-location/  — returns active office location (all users)
+    POST /attendance/office-location/  — create / update office location (admin only)
+    """
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticatedUser()]
+        return [make_permission('manage_settings')()]
+
+    def get(self, request):
+        office = OfficeLocation.active()
+        if not office:
+            return Response({'detail': 'No office location configured.'}, status=404)
+        return Response(OfficeLocationSerializer(office).data)
+
+    def post(self, request):
+        """
+        Creates a new active location and deactivates all previous ones,
+        OR updates existing active one in-place.
+        """
+        name          = request.data.get('name', 'Head Office')
+        latitude      = request.data.get('latitude')
+        longitude     = request.data.get('longitude')
+        radius_meters = request.data.get('radius_meters', 300)
+
+        if latitude is None or longitude is None:
+            return Response(
+                {'error': 'latitude and longitude are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Deactivate all existing
+        OfficeLocation.objects.filter(is_active=True).update(is_active=False)
+
+        office = OfficeLocation.objects.create(
+            name          = name,
+            latitude      = latitude,
+            longitude     = longitude,
+            radius_meters = radius_meters,
+            is_active     = True,
+        )
+
+        return Response(OfficeLocationSerializer(office).data, status=status.HTTP_201_CREATED)
+
+
 # ── CHECK-IN ──────────────────────────────────────────────────────────────────
 
 class CheckInView(APIView):
@@ -56,6 +139,23 @@ class CheckInView(APIView):
         today    = date.today()
         is_wfh   = request.data.get('is_wfh', False)
         now_time = datetime.now().time()
+
+        # ── Location validation (skip for WFH) ───────────────────────────────
+        if not is_wfh:
+            lat = request.data.get('latitude')
+            lon = request.data.get('longitude')
+            ok, distance_m, office, error_msg = _validate_location(lat, lon)
+            if not ok:
+                return Response(
+                    {
+                        'error':      error_msg,
+                        'distance_m': distance_m,
+                        'allowed_radius': office.radius_meters if office else None,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            lat, lon, distance_m = None, None, None
 
         existing = AttendanceRecord.objects.filter(
             employee=request.user, date=today
@@ -68,27 +168,34 @@ class CheckInView(APIView):
             )
 
         if existing:
-            existing.check_in = now_time
-            existing.is_wfh   = is_wfh
-            existing.status   = 'half_day'
-            existing.note     = 'Checked in — awaiting checkout'
+            existing.check_in            = now_time
+            existing.is_wfh              = is_wfh
+            existing.status              = 'half_day'
+            existing.note                = 'Checked in — awaiting checkout'
+            existing.checkin_latitude    = lat
+            existing.checkin_longitude   = lon
+            existing.checkin_distance_m  = distance_m
             existing.save()
             record = existing
         else:
             record = AttendanceRecord.objects.create(
-                employee = request.user,
-                date     = today,
-                check_in = now_time,
-                is_wfh   = is_wfh,
-                status   = 'half_day',
-                note     = 'Checked in — awaiting checkout',
+                employee            = request.user,
+                date                = today,
+                check_in            = now_time,
+                is_wfh              = is_wfh,
+                status              = 'half_day',
+                note                = 'Checked in — awaiting checkout',
+                checkin_latitude    = lat,
+                checkin_longitude   = lon,
+                checkin_distance_m  = distance_m,
             )
 
         return Response({
-            'message':  'Checked in successfully',
-            'check_in': str(now_time.strftime('%H:%M')),
-            'is_wfh':   is_wfh,
-            'record':   AttendanceRecordSerializer(record).data,
+            'message':     'Checked in successfully',
+            'check_in':    str(now_time.strftime('%H:%M')),
+            'is_wfh':      is_wfh,
+            'distance_m':  distance_m,
+            'record':      AttendanceRecordSerializer(record).data,
         })
 
 
@@ -117,6 +224,23 @@ class CheckOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ── Location validation (skip for WFH) ───────────────────────────────
+        if not record.is_wfh:
+            lat = request.data.get('latitude')
+            lon = request.data.get('longitude')
+            ok, distance_m, office, error_msg = _validate_location(lat, lon)
+            if not ok:
+                return Response(
+                    {
+                        'error':          error_msg,
+                        'distance_m':     distance_m,
+                        'allowed_radius': office.radius_meters if office else None,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            lat, lon, distance_m = None, None, None
+
         standard_hours = Decimal(str(get_standard_hours()))
 
         ci   = datetime.combine(today, record.check_in)
@@ -124,10 +248,13 @@ class CheckOutView(APIView):
         diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
         ot   = max(diff - standard_hours, Decimal('0'))
 
-        record.check_out    = now_time
-        record.hours_worked = diff
-        record.ot_hours     = ot
-        record.status       = _get_status(record.check_in, now_time, diff)
+        record.check_out             = now_time
+        record.hours_worked          = diff
+        record.ot_hours              = ot
+        record.status                = _get_status(record.check_in, now_time, diff)
+        record.checkout_latitude     = lat
+        record.checkout_longitude    = lon
+        record.checkout_distance_m   = distance_m
         if 'awaiting checkout' in (record.note or '').lower():
             record.note = ''
         record.save()
@@ -138,6 +265,7 @@ class CheckOutView(APIView):
             'hours_worked': float(diff),
             'ot_hours':     float(ot),
             'status':       record.status,
+            'distance_m':   distance_m,
             'record':       AttendanceRecordSerializer(record).data,
         })
 
@@ -166,14 +294,16 @@ class TodayAttendanceView(APIView):
             })
 
         return Response({
-            'date':         str(today),
-            'checked_in':   bool(record.check_in),
-            'checked_out':  bool(record.check_out),
-            'check_in':     record.check_in.strftime('%H:%M') if record.check_in  else None,
-            'check_out':    record.check_out.strftime('%H:%M') if record.check_out else None,
-            'hours_worked': float(record.hours_worked),
-            'status':       record.status,
-            'is_wfh':       record.is_wfh,
+            'date':                str(today),
+            'checked_in':          bool(record.check_in),
+            'checked_out':         bool(record.check_out),
+            'check_in':            record.check_in.strftime('%H:%M')  if record.check_in  else None,
+            'check_out':           record.check_out.strftime('%H:%M') if record.check_out else None,
+            'hours_worked':        float(record.hours_worked),
+            'status':              record.status,
+            'is_wfh':              record.is_wfh,
+            'checkin_distance_m':  record.checkin_distance_m,
+            'checkout_distance_m': record.checkout_distance_m,
         })
 
 
@@ -186,14 +316,12 @@ class MyAttendanceView(APIView):
         month = int(request.query_params.get('month', date.today().month))
         year  = int(request.query_params.get('year',  date.today().year))
 
-        # ── 1. Real attendance records ────────────────────────────────────────
         records = AttendanceRecord.objects.filter(
             employee=request.user,
             date__year=year,
             date__month=month,
         ).order_by('date')
 
-        # ── 2. Approved leave requests that overlap this month ────────────────
         from leave.models import LeaveRequest
         approved_leaves = LeaveRequest.objects.filter(
             employee=request.user,
@@ -208,30 +336,20 @@ class MyAttendanceView(APIView):
             cur = lr.start_date
             while cur <= lr.end_date:
                 if cur.year == year and cur.month == month:
-                    leave_dates[str(cur)] = {
-                        'name':   lr.leave_type.name,
-                        'is_lop': is_lop,
-                    }
+                    leave_dates[str(cur)] = {'name': lr.leave_type.name, 'is_lop': is_lop}
                 cur += timedelta(days=1)
 
-        # ── 3. Holidays ───────────────────────────────────────────────────────
         holidays = Holiday.objects.filter(
             date__year=year, date__month=month
         ).values('date', 'name')
 
-        # ── 4. Build serialized records list ──────────────────────────────────
         record_map = {str(r.date): r for r in records}
         serialized = list(AttendanceRecordSerializer(records, many=True).data)
 
         today_str = str(date.today())
 
-        # Mark missing-checkout records as half_day
         for rec in serialized:
-            if (
-                rec.get('check_in') and
-                not rec.get('check_out') and
-                rec.get('date') != today_str
-            ):
+            if rec.get('check_in') and not rec.get('check_out') and rec.get('date') != today_str:
                 rec['status'] = 'half_day'
 
         existing_dates = set(record_map.keys())
@@ -261,7 +379,6 @@ class MyAttendanceView(APIView):
                         rec['is_lop']     = leave_info['is_lop']
                         break
 
-        # ── 5. Summary ────────────────────────────────────────────────────────
         status_counts = {}
         for rec in serialized:
             st = rec.get('status', 'absent')
@@ -278,7 +395,6 @@ class MyAttendanceView(APIView):
             'total_ot':    float(sum(r.ot_hours     for r in records if r.ot_hours)),
         }
 
-        # ── 6. Active policy block — so frontend can display current rules ────
         shift_start   = get_shift_start()
         grace_minutes = get_grace_minutes()
         late_cutoff   = (
@@ -333,16 +449,11 @@ class ApplyRegularizationView(APIView):
         target_date_str = request.data.get('date')
 
         if not reason:
-            return Response(
-                {'error': 'reason is required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({'error': 'reason is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if record_id:
             try:
-                record = AttendanceRecord.objects.get(
-                    id=record_id, employee=request.user
-                )
+                record = AttendanceRecord.objects.get(id=record_id, employee=request.user)
             except AttendanceRecord.DoesNotExist:
                 return Response({'error': 'Record not found'}, status=404)
 
@@ -350,10 +461,7 @@ class ApplyRegularizationView(APIView):
             try:
                 target_date = date.fromisoformat(target_date_str)
             except ValueError:
-                return Response(
-                    {'error': 'Invalid date format. Use YYYY-MM-DD'},
-                    status=400
-                )
+                return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
             record, created = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
                 date=target_date,
@@ -395,10 +503,7 @@ class ApplyRegularizationView(APIView):
         except Exception as e:
             print("Regularization notification error:", e)
 
-        return Response(
-            RegularizationSerializer(reg).data,
-            status=status.HTTP_201_CREATED
-        )
+        return Response(RegularizationSerializer(reg).data, status=status.HTTP_201_CREATED)
 
 
 # ── REGULARIZATION — MY LIST ──────────────────────────────────────────────────
@@ -414,14 +519,12 @@ class MyRegularizationsView(APIView):
 
 
 # ── REGULARIZATION — ALL (Manager/HR) ─────────────────────────────────────────
+
 class AllRegularizationsView(APIView):
     permission_classes = [make_permission('approve_regularize')]
 
     def get(self, request):
         status_filter = request.query_params.get('status', 'pending')
-
-        # KEY FIX: exclude current user's own regularization requests
-        # so HR/Manager cannot approve their own regularizations.
         regs = AttendanceRegularization.objects.filter(
             status=status_filter
         ).exclude(
@@ -430,6 +533,8 @@ class AllRegularizationsView(APIView):
             'attendance', 'employee', 'employee__profile', 'approved_by'
         )
         return Response(RegularizationSerializer(regs, many=True).data)
+
+
 # ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
 
 class ApproveRegularizationView(APIView):
@@ -477,7 +582,6 @@ class ApproveRegularizationView(APIView):
                 ci   = datetime.combine(date.today(), record.check_in)
                 co   = datetime.combine(date.today(), record.check_out)
                 diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
-
                 record.hours_worked = diff
                 record.ot_hours     = max(diff - standard_hours, Decimal('0'))
                 record.status       = _get_status(record.check_in, record.check_out, diff)

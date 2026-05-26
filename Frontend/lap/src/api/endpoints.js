@@ -1,5 +1,5 @@
-// const BASE = 'http://localhost:8000/api'
-const BASE = 'https://lap-b9vi.onrender.com/api'
+const BASE = 'http://localhost:8000/api'
+// const BASE = 'https://lap-b9vi.onrender.com/api'
 
 const ENDPOINTS = {
   AUTH: {
@@ -42,6 +42,7 @@ const ENDPOINTS = {
     ALL_REGULARIZATIONS: `${BASE}/attendance/regularize/all/`,
     REGULARIZE_ACTION: (id) => `${BASE}/attendance/regularize/${id}/action/`,
     HOLIDAYS:            `${BASE}/attendance/holidays/`,
+    OFFICE_LOCATION:     `${BASE}/attendance/office-location/`,
   },
   LEAVE: {
     TYPES:           `${BASE}/leave/types/`,
