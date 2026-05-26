@@ -1,14 +1,14 @@
 # attendance/settings_helper.py
 """
-Single source of truth for reading all system policies.
-All attendance and payroll modules import from here — nothing is hardcoded.
-Keys match exactly what is stored in SystemSetting table.
+Single source of truth for ALL system policy reads.
+Every module imports from here — nothing hardcoded anywhere.
+Adding a new setting = add a getter here.
 """
 from datetime import time
+from decimal import Decimal
 
 
 def _get(key, default):
-    """Read one SystemSetting by key. Returns default if missing or error."""
     try:
         from notifications.models import SystemSetting
         s = SystemSetting.objects.filter(key=key).first()
@@ -19,8 +19,9 @@ def _get(key, default):
     return default
 
 
+# ── ATTENDANCE ────────────────────────────────────────────────────────────────
+
 def get_shift_start() -> time:
-    """Shift start time. Key: work_start_time. Default: 09:00"""
     raw = _get('work_start_time', '09:00')
     try:
         h, m = str(raw).strip().split(':')
@@ -29,39 +30,197 @@ def get_shift_start() -> time:
         return time(9, 0)
 
 
+def get_shift_end() -> time:
+    raw = _get('work_end_time', '18:00')
+    try:
+        h, m = str(raw).strip().split(':')
+        return time(int(h), int(m))
+    except Exception:
+        return time(18, 0)
+
+
 def get_grace_minutes() -> int:
-    """Grace period in minutes. Key: grace_period_minutes. Default: 15"""
     return int(_get('grace_period_minutes', 15))
 
 
 def get_standard_hours() -> float:
-    """Standard working hours per day. Key: work_hours_per_day. Default: 8"""
     return float(_get('work_hours_per_day', 8))
 
 
 def get_half_day_hours() -> float:
-    """Hours below which = half day. Key: half_day_hours. Default: 4"""
     return float(_get('half_day_hours', 4))
 
 
 def get_late_per_half_day() -> int:
-    """Late marks that trigger 0.5 LOP. Key: late_marks_per_half_day. Default: 3"""
-    val = int(_get('late_marks_per_half_day', 3))
-    return max(val, 1)
+    return max(int(_get('late_marks_per_half_day', 3)), 1)
+
+
+def get_overtime_multiplier() -> Decimal:
+    return Decimal(str(_get('overtime_multiplier', 1.5)))
+
+
+def get_regularization_window() -> int:
+    return int(_get('regularization_window_days', 7))
+
+
+def get_wfh_enabled() -> bool:
+    return bool(_get('wfh_enabled', True))
+
+
+def get_auto_absent_enabled() -> bool:
+    return bool(_get('auto_absent_enabled', True))
 
 
 def get_weekend_days() -> list:
-    """Weekend days list. Key: weekend_days. Default: ['saturday','sunday']"""
+    """Returns list like ['saturday','sunday'] or ['sunday']"""
     raw = _get('weekend_days', ['saturday', 'sunday'])
     if isinstance(raw, list):
-        return raw
+        return [d.lower() for d in raw]
     try:
         import json
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        return [d.lower() for d in parsed]
     except Exception:
         return ['saturday', 'sunday']
 
 
 def get_work_days_per_week() -> int:
-    """Working days per week. Key: work_days_per_week. Default: 5"""
     return int(_get('work_days_per_week', 5))
+
+
+def is_weekend(date_obj) -> bool:
+    """
+    Returns True if date_obj falls on a configured weekend day.
+    Uses weekend_days setting — works for both 5-day and 6-day weeks.
+    """
+    DAY_NAMES = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    day_name = DAY_NAMES[date_obj.weekday()]
+    return day_name in get_weekend_days()
+
+
+def get_working_days_in_month(year: int, month: int) -> tuple:
+    """
+    Returns (working_days, total_days_in_month) using weekend_days setting.
+    Replaces hardcoded weekday < 5 logic everywhere.
+    """
+    import calendar
+    from datetime import date
+    _, days_in_month = calendar.monthrange(year, month)
+    working = sum(
+        1 for d in range(1, days_in_month + 1)
+        if not is_weekend(date(year, month, d))
+    )
+    return working, days_in_month
+
+
+# ── PAYROLL ───────────────────────────────────────────────────────────────────
+
+def get_pf_employee_percent() -> Decimal:
+    """PF employee contribution % of Basic. Default 12."""
+    return Decimal(str(_get('pf_employee_percent', 12)))
+
+
+def get_pf_employer_percent() -> Decimal:
+    """PF employer contribution % of Basic. Default 12."""
+    return Decimal(str(_get('pf_employer_percent', 12)))
+
+
+def get_esi_employee_percent() -> Decimal:
+    """ESI employee contribution % of gross. Default 0.75."""
+    return Decimal(str(_get('esi_employee_percent', 0.75)))
+
+
+def get_esi_employer_percent() -> Decimal:
+    """ESI employer contribution % of gross. Default 3.25."""
+    return Decimal(str(_get('esi_employer_percent', 3.25)))
+
+
+def get_esi_threshold() -> Decimal:
+    """Gross salary above this = ESI exempt. Default 21000."""
+    return Decimal(str(_get('esi_threshold_salary', 21000)))
+
+
+def get_tds_flat_contract() -> Decimal:
+    """Flat TDS % for contract employees. Default 10."""
+    return Decimal(str(_get('tds_flat_percent_contract', 10)))
+
+
+def get_pt_slabs() -> list:
+    """
+    Returns PT slabs as list of dicts: [{'upto': 20000, 'pt': 150}, ...]
+    Sorted ascending by upto. Last entry catches all remaining.
+    """
+    default = [
+        {'upto': 15000,     'pt': 0},
+        {'upto': 20000,     'pt': 150},
+        {'upto': 99999999,  'pt': 200},
+    ]
+    raw = _get('pt_slab_json', default)
+    if isinstance(raw, list):
+        return sorted(raw, key=lambda x: x.get('upto', 0))
+    try:
+        import json
+        return sorted(json.loads(raw), key=lambda x: x.get('upto', 0))
+    except Exception:
+        return default
+
+
+def get_basic_salary_percent() -> Decimal:
+    return Decimal(str(_get('basic_salary_percent', 40)))
+
+
+def get_hra_metro_percent() -> Decimal:
+    return Decimal(str(_get('hra_percent_metro', 50)))
+
+
+def get_hra_nonmetro_percent() -> Decimal:
+    return Decimal(str(_get('hra_percent_nonmetro', 40)))
+
+
+def get_payroll_lock_day() -> int:
+    return int(_get('payroll_lock_day', 25))
+
+
+# ── LEAVE ─────────────────────────────────────────────────────────────────────
+
+def get_leave_year_basis() -> str:
+    """'calendar' or 'fiscal'"""
+    return str(_get('leave_year_basis', 'calendar'))
+
+
+def get_carry_forward_month() -> int:
+    return int(_get('carry_forward_month', 1))
+
+
+def get_el_max_carry_forward() -> int:
+    return int(_get('el_max_carry_forward', 45))
+
+
+def get_half_day_leave_enabled() -> bool:
+    return bool(_get('half_day_leave_enabled', True))
+
+
+def get_leave_low_threshold() -> int:
+    return int(_get('leave_balance_low_threshold', 2))
+
+
+def get_sandwich_rule() -> bool:
+    return bool(_get('sandwich_rule_enabled', True))
+
+
+# ── GENERAL ───────────────────────────────────────────────────────────────────
+
+def get_company_name() -> str:
+    return str(_get('company_name', 'My Company'))
+
+
+def get_currency() -> str:
+    return str(_get('currency', 'INR'))
+
+
+def get_fiscal_year_start_month() -> int:
+    return int(_get('fiscal_year_start_month', 4))
+
+
+def get_probation_months() -> int:
+    return int(_get('probation_period_months', 6))

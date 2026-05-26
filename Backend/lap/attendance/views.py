@@ -414,18 +414,22 @@ class MyRegularizationsView(APIView):
 
 
 # ── REGULARIZATION — ALL (Manager/HR) ─────────────────────────────────────────
-
 class AllRegularizationsView(APIView):
     permission_classes = [make_permission('approve_regularize')]
 
     def get(self, request):
         status_filter = request.query_params.get('status', 'pending')
+
+        # KEY FIX: exclude current user's own regularization requests
+        # so HR/Manager cannot approve their own regularizations.
         regs = AttendanceRegularization.objects.filter(
             status=status_filter
-        ).select_related('attendance', 'employee', 'employee__profile', 'approved_by')
+        ).exclude(
+            employee=request.user
+        ).select_related(
+            'attendance', 'employee', 'employee__profile', 'approved_by'
+        )
         return Response(RegularizationSerializer(regs, many=True).data)
-
-
 # ── REGULARIZATION — APPROVE / REJECT ─────────────────────────────────────────
 
 class ApproveRegularizationView(APIView):
