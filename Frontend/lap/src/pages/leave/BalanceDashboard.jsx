@@ -3,7 +3,7 @@
 // Next year preview if carry-forward exists.
 import { useEffect, useState } from 'react'
 import { getMyBalanceApi } from '../../api/services/leave'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 import toast from 'react-hot-toast'
 
 const fmt = (v) => parseFloat(v || 0).toFixed(1)

@@ -3,7 +3,7 @@
 // Shows current year + carry-forward balance clearly per type.
 import { useEffect, useState } from 'react'
 import { getLeaveTypesApi, applyLeaveApi, getMyBalanceApi } from '../../api/services/leave'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 import toast from 'react-hot-toast'
 
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']

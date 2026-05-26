@@ -2,7 +2,7 @@
 // No duplicates. Each setting shows exactly which modules it affects.
 import { useState, useEffect } from 'react'
 import { useSelector } from 'react-redux'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 
 const CATEGORY_META = {
   attendance: {

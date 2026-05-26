@@ -6,7 +6,7 @@ import {
   getRunsApi, createRunApi, processRunApi,
   approveRunApi, getRunDetailApi, addAdjustmentApi
 } from '../../api/services/payroll'
-import systemSettingsService from '../../api/services/systemSettings'
+import systemSettingsService from '../../api/services/systemsettings'
 import usePermission from '../../hooks/usePermission'
 import toast from 'react-hot-toast'
 
