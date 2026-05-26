@@ -14,16 +14,39 @@ class SalaryStructureSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SalaryStructure
         fields = [
-            'id', 'employee', 'employee_name', 'emp_code',
-            'effective_date', 'ctc',
-            'basic', 'hra', 'da', 'special_allowance',
-            'transport', 'medical', 'other_allowance',
-            'pf_employee', 'esi_employee', 'pt',
-            'pf_employer', 'esi_employer',
-            'gross', 'total_deductions', 'net_pay',
-            'is_active', 'created_by', 'created_at',
-        ]
 
+    'id',
+
+    'employee',
+    'employee_name',
+    'emp_code',
+
+    'effective_date',
+
+    'ctc',
+
+    'basic_percent',
+    'hra_percent',
+    'da_percent',
+
+    'pf_percent',
+    'esi_percent',
+
+    'transport',
+    'medical',
+    'other_allowance',
+
+    'pt',
+
+    'gross',
+    'total_deductions',
+    'net_pay',
+
+    'is_active',
+
+    'created_by',
+    'created_at',
+]
     def get_employee_name(self, obj):
       full = obj.employee.get_full_name().strip()
       return full if full else obj.employee.username

@@ -52,7 +52,7 @@ export default function SalaryConfig() {
   const setN = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
 
   const handleSave = async () => {
-    if (!form.employee || !form.effective_date || !form.basic) {
+    if (!form.employee || !form.effective_date || !form.ctc) {
       toast.error('Employee, date, and basic are required')
       return
     }
