@@ -98,6 +98,16 @@ SETTINGS = [
         description='Minimum working days notice required for Casual Leave.',
     ),
     dict(
+        key='sl_advance_notice_days', value='0', value_type='integer', category='leave',
+        label='SL Advance Notice (Days) ✓',
+        description='Minimum working days notice required for Sick Leave. 0 = no restriction.',
+    ),
+    dict(
+        key='el_advance_notice_days', value='1', value_type='integer', category='leave',
+        label='EL Advance Notice (Days) ✓',
+        description='Minimum working days notice required for Earned Leave.',
+    ),
+    dict(
         key='sl_days_per_year', value='12', value_type='integer', category='leave',
         label='Sick Leave (SL) — Days/Year ✓',
         description='Annual SL allocation for Regular employees.',
@@ -116,6 +126,26 @@ SETTINGS = [
         key='el_max_carry_forward', value='45', value_type='integer', category='leave',
         label='EL — Max Carry Forward (Days) ✓',
         description='Maximum EL days that carry to next year. Excess is lapsed.',
+    ),
+    dict(
+        key='el_carry_forward', value='true', value_type='boolean', category='leave',
+        label='EL — Carry Forward Enabled ✓',
+        description='Whether unused Earned Leave balance carries to next year.',
+    ),
+    dict(
+        key='cl_is_paid', value='true', value_type='boolean', category='leave',
+        label='CL — Paid Leave ✓',
+        description='Whether Casual Leave is paid. Affects LOP deduction in payslip.',
+    ),
+    dict(
+        key='sl_is_paid', value='true', value_type='boolean', category='leave',
+        label='SL — Paid Leave ✓',
+        description='Whether Sick Leave is paid. Affects LOP deduction in payslip.',
+    ),
+    dict(
+        key='el_is_paid', value='true', value_type='boolean', category='leave',
+        label='EL — Paid Leave ✓',
+        description='Whether Earned Leave is paid. Affects LOP deduction in payslip.',
     ),
     dict(
         key='sandwich_rule_enabled', value='true', value_type='boolean', category='leave',

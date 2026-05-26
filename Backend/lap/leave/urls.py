@@ -5,7 +5,7 @@ from .views import (
     MyLeaveBalanceView, InitBalanceView, CarryForwardView,
     ApplyLeaveView, MyLeaveRequestsView, CancelLeaveView,
     AllLeaveRequestsView, LeaveActionView,
-    LeavePriorUsageView,
+    LeavePriorUsageView, LeavePolicySettingsView,
 )
 
 urlpatterns = [
@@ -13,11 +13,12 @@ urlpatterns = [
     path('leave/types/<int:pk>/',       LeaveTypeDetailView.as_view()),
     path('leave/balance/',              MyLeaveBalanceView.as_view()),
     path('leave/balance/init/',         InitBalanceView.as_view()),
-    path('leave/carry-forward/',        CarryForwardView.as_view()),      # NEW
+    path('leave/carry-forward/',        CarryForwardView.as_view()),
     path('leave/apply/',                ApplyLeaveView.as_view()),
     path('leave/my/',                   MyLeaveRequestsView.as_view()),
     path('leave/<int:pk>/cancel/',      CancelLeaveView.as_view()),
     path('leave/all/',                  AllLeaveRequestsView.as_view()),
     path('leave/<int:pk>/action/',      LeaveActionView.as_view()),
     path('leave/<int:pk>/prior-usage/', LeavePriorUsageView.as_view()),
+    path('leave/policy-settings/',      LeavePolicySettingsView.as_view()),  # NEW — system settings sync
 ]

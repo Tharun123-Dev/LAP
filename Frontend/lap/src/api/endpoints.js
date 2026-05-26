@@ -55,6 +55,7 @@ const ENDPOINTS = {
     ACTION: (id)       => `${BASE}/leave/${id}/action/`,
     CANCEL: (id)       => `${BASE}/leave/${id}/cancel/`,
     PRIOR_USAGE: (id)  => `${BASE}/leave/${id}/prior-usage/`,
+    POLICY_SETTINGS:   `${BASE}/leave/policy-settings/`,
   },
   PAYROLL: {
     SALARY_LIST:       `${BASE}/payroll/salary/`,

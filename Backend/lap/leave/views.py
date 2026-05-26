@@ -127,7 +127,10 @@ class ApplyLeaveView(APIView):
             return Response({'error': 'Leave type not found'}, status=404)
 
         # Notice period check — reads SystemSetting first, falls back to LeaveType.min_notice_days
-        from attendance.settings_helper import get_leave_advance_notice_days
+        from attendance.settings_helper import (
+            get_leave_advance_notice_days,
+            get_leave_days_allowed,
+        )
         system_notice = get_leave_advance_notice_days(lt.code)
         effective_notice = system_notice if system_notice > 0 else lt.min_notice_days
         if effective_notice > 0:
@@ -423,4 +426,213 @@ class LeavePriorUsageView(APIView):
             'total_prior_days': total_prior_days,
             'annual_balance':   annual_balance,
             'has_prior':        total_prior_days > 0,
+        })
+
+# ── LEAVE POLICY SETTINGS SYNC ────────────────────────────────────────────────
+
+class LeavePolicySettingsView(APIView):
+    """
+    GET  /api/leave/policy-settings/
+        Returns per-leave-type effective settings (merged: system settings win,
+        LeaveType fields as fallback). Used by LeaveTypeConfig editor to show
+        what system settings currently say for each leave type.
+
+    POST /api/leave/policy-settings/
+        Body: { "leave_type_id": 1, "fields": { "min_notice_days": 3, "days_allowed": 15, ... } }
+        Saves changes BOTH to LeaveType record AND to SystemSetting keys so
+        both places stay in sync.  Admin/HR only.
+    """
+
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticatedUser()]
+        return [make_permission('configure_leave')()]
+
+    def get(self, request):
+        from attendance.settings_helper import (
+            get_leave_advance_notice_days,
+            get_leave_days_allowed,
+            get_leave_is_paid,
+            get_leave_carry_forward,
+        )
+        leave_types = LeaveType.objects.filter(is_active=True)
+        result = []
+        for lt in leave_types:
+            code = lt.code
+
+            # days_allowed: system setting wins if set
+            sys_days = get_leave_days_allowed(code)
+            eff_days = sys_days if sys_days >= 0 else lt.days_allowed
+
+            # min_notice_days: system setting wins if > 0
+            sys_notice = get_leave_advance_notice_days(code)
+            eff_notice = sys_notice if sys_notice > 0 else lt.min_notice_days
+
+            # is_paid: system setting wins if set (0 or 1), else use model
+            sys_paid = get_leave_is_paid(code)
+            eff_paid = (sys_paid == 1) if sys_paid >= 0 else lt.is_paid
+
+            # carry_forward: system setting wins if set
+            sys_cf = get_leave_carry_forward(code)
+            eff_cf = (sys_cf == 1) if sys_cf >= 0 else lt.carry_forward
+
+            result.append({
+                'id':                  lt.id,
+                'name':                lt.name,
+                'code':                code,
+                'applicable_to':       lt.applicable_to,
+                'description':         lt.description,
+                'requires_document':   lt.requires_document,
+                'max_carry_forward':   lt.max_carry_forward,
+
+                # effective values (system setting merged with model)
+                'days_allowed':        eff_days,
+                'min_notice_days':     eff_notice,
+                'is_paid':             eff_paid,
+                'carry_forward':       eff_cf,
+
+                # where each value comes from
+                'days_allowed_source':    'system_settings' if sys_days >= 0 else 'leave_type',
+                'notice_days_source':     'system_settings' if sys_notice > 0 else 'leave_type',
+                'is_paid_source':         'system_settings' if sys_paid >= 0 else 'leave_type',
+                'carry_forward_source':   'system_settings' if sys_cf >= 0 else 'leave_type',
+            })
+        return Response(result)
+
+    def post(self, request):
+        """
+        Sync a leave type's editable fields to BOTH LeaveType model AND SystemSetting.
+        This is the single save point — no separate saves needed in settings page.
+        """
+        from notifications.models import SystemSetting
+
+        lt_id  = request.data.get('leave_type_id')
+        fields = request.data.get('fields', {})
+
+        if not lt_id:
+            return Response({'error': 'leave_type_id required'}, status=400)
+
+        try:
+            lt = LeaveType.objects.get(pk=lt_id)
+        except LeaveType.DoesNotExist:
+            return Response({'error': 'Leave type not found'}, status=404)
+
+        code = lt.code.lower()
+        updated_model_fields = []
+        updated_settings = []
+
+        # ── days_allowed ─────────────────────────────────────────────────────
+        if 'days_allowed' in fields:
+            val = int(fields['days_allowed'])
+            old_days = lt.days_allowed  # capture BEFORE updating
+            lt.days_allowed = val
+            updated_model_fields.append('days_allowed')
+
+            # sync to system setting
+            key = f'{code}_days_per_year'
+            obj, _ = SystemSetting.objects.get_or_create(
+                key=key,
+                defaults={
+                    'value': str(val), 'value_type': 'integer',
+                    'label': f'{lt.name} — Days/Year', 'category': 'leave',
+                    'description': f'Annual {lt.name} allocation.',
+                }
+            )
+            obj.value = str(val)
+            obj.save(update_fields=['value'])
+            updated_settings.append(key)
+
+            # ── CRITICAL: update existing LeaveBalance.total for current year ──
+            # So the Balance Dashboard, Apply Leave remaining, and Payroll all
+            # immediately reflect the new allocation without needing to re-init.
+            current_year = date.today().year
+            balances_to_update = LeaveBalance.objects.filter(
+                leave_type=lt,
+                year=current_year,
+            )
+            balance_updated_count = 0
+            for bal in balances_to_update:
+                carried = float(bal.carried or 0)
+                new_total = val + carried           # new base + any carried days
+                expected_old_total = old_days + carried  # what it should have been
+                # Only touch balances that match the expected old total
+                # (avoids overwriting manually adjusted balances)
+                if abs(float(bal.total) - expected_old_total) < 0.1:
+                    bal.total = new_total
+                    bal.save(update_fields=['total'])
+                    balance_updated_count += 1
+
+        # ── min_notice_days ───────────────────────────────────────────────────
+        if 'min_notice_days' in fields:
+            val = int(fields['min_notice_days'])
+            lt.min_notice_days = val
+            updated_model_fields.append('min_notice_days')
+            key = f'{code}_advance_notice_days'
+            obj, _ = SystemSetting.objects.get_or_create(
+                key=key,
+                defaults={
+                    'value': str(val), 'value_type': 'integer',
+                    'label': f'{lt.name} Advance Notice (Days)', 'category': 'leave',
+                    'description': f'Min working days notice required for {lt.name}.',
+                }
+            )
+            obj.value = str(val)
+            obj.save(update_fields=['value'])
+            updated_settings.append(key)
+
+        # ── is_paid ───────────────────────────────────────────────────────────
+        if 'is_paid' in fields:
+            val = bool(fields['is_paid'])
+            lt.is_paid = val
+            updated_model_fields.append('is_paid')
+            key = f'{code}_is_paid'
+            obj, _ = SystemSetting.objects.get_or_create(
+                key=key,
+                defaults={
+                    'value': str(val).lower(), 'value_type': 'boolean',
+                    'label': f'{lt.name} — Paid Leave', 'category': 'leave',
+                    'description': f'Whether {lt.name} is paid.',
+                }
+            )
+            obj.value = str(val).lower()
+            obj.save(update_fields=['value'])
+            updated_settings.append(key)
+
+        # ── carry_forward ─────────────────────────────────────────────────────
+        if 'carry_forward' in fields:
+            val = bool(fields['carry_forward'])
+            lt.carry_forward = val
+            updated_model_fields.append('carry_forward')
+            key = f'{code}_carry_forward'
+            obj, _ = SystemSetting.objects.get_or_create(
+                key=key,
+                defaults={
+                    'value': str(val).lower(), 'value_type': 'boolean',
+                    'label': f'{lt.name} — Carry Forward', 'category': 'leave',
+                    'description': f'Whether unused {lt.name} carries to next year.',
+                }
+            )
+            obj.value = str(val).lower()
+            obj.save(update_fields=['value'])
+            updated_settings.append(key)
+
+        # ── other direct model fields ─────────────────────────────────────────
+        for field in ('name', 'applicable_to', 'description',
+                      'requires_document', 'max_carry_forward'):
+            if field in fields:
+                setattr(lt, field, fields[field])
+                updated_model_fields.append(field)
+
+        if updated_model_fields:
+            lt.save(update_fields=list(set(updated_model_fields)))
+
+        # Count how many balances were updated (for response info)
+        balances_updated = locals().get('balance_updated_count', 0)
+
+        return Response({
+            'message':           f'Saved to both LeaveType and SystemSettings. {balances_updated} employee balance(s) updated for {date.today().year}.',
+            'leave_type_id':     lt.id,
+            'updated_fields':    list(set(updated_model_fields)),
+            'synced_settings':   updated_settings,
+            'balances_updated':  balances_updated,
         })

@@ -164,11 +164,19 @@ def get_leave_balance_summary(employee, year: int) -> list:
         employee=employee, year=year,
     ).select_related('leave_type').order_by('leave_type__name')
 
+    # Import here to avoid circular imports
+    try:
+        from attendance.settings_helper import get_leave_days_allowed
+    except Exception:
+        get_leave_days_allowed = lambda code: -1
+
     result = []
     for bal in balances:
         carried = float(bal.carried or 0)
-        base    = float(bal.leave_type.days_allowed)
-        total   = float(bal.total)
+        # Use system-settings value if available, else fall back to model field
+        sys_days = get_leave_days_allowed(bal.leave_type.code)
+        base     = float(sys_days) if sys_days >= 0 else float(bal.leave_type.days_allowed)
+        total    = float(bal.total)
         used    = float(bal.used)
         pending = float(bal.pending)
         remaining = max(total - used - pending, 0)

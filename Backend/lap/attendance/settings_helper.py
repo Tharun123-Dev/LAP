@@ -231,14 +231,89 @@ def get_cl_advance_notice_days() -> int:
     return int(_get('cl_advance_notice_days', 0))
 
 
+def get_sl_advance_notice_days() -> int:
+    """Advance notice days required for Sick Leave — from System Settings."""
+    return int(_get('sl_advance_notice_days', 0))
+
+
+def get_el_advance_notice_days() -> int:
+    """Advance notice days required for Earned Leave — from System Settings."""
+    return int(_get('el_advance_notice_days', 0))
+
+
 def get_leave_advance_notice_days(leave_code: str) -> int:
     """
-    Returns the advance notice days for any leave type code.
-    Currently reads cl_advance_notice_days for CL.
-    Falls back to 0 (no restriction) for other types.
+    Returns the system-settings advance notice days for any leave type code.
+    Reads <code_lower>_advance_notice_days from SystemSetting.
+    Falls back to 0 if no setting found.
     """
     code = (leave_code or '').upper()
     if code == 'CL':
         return get_cl_advance_notice_days()
-    # Future: add SL, EL keys here
+    if code == 'SL':
+        return get_sl_advance_notice_days()
+    if code == 'EL':
+        return get_el_advance_notice_days()
+    # Generic fallback: try <code_lower>_advance_notice_days
+    key = f"{leave_code.lower()}_advance_notice_days"
+    val = _get(key, None)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
     return 0
+
+
+def get_leave_days_allowed(leave_code: str) -> int:
+    """
+    Returns system-settings days_allowed for any leave type code.
+    Reads <code_lower>_days_per_year from SystemSetting.
+    Returns -1 if no setting found (caller should use LeaveType.days_allowed).
+    """
+    code = (leave_code or '').lower()
+    key  = f"{code}_days_per_year"
+    val  = _get(key, None)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+    return -1
+
+
+def get_leave_is_paid(leave_code: str) -> int:
+    """
+    Returns system-settings is_paid override for a leave code.
+    Reads <code_lower>_is_paid from SystemSetting.
+    Returns -1 if no setting found (caller uses LeaveType.is_paid).
+    """
+    code = (leave_code or '').lower()
+    key  = f"{code}_is_paid"
+    val  = _get(key, None)
+    if val is not None:
+        if isinstance(val, bool):
+            return 1 if val else 0
+        if str(val).lower() in ('true', '1', 'yes'):
+            return 1
+        if str(val).lower() in ('false', '0', 'no'):
+            return 0
+    return -1
+
+
+def get_leave_carry_forward(leave_code: str) -> int:
+    """
+    Returns system-settings carry_forward override for a leave code.
+    Returns -1 if no setting found.
+    """
+    code = (leave_code or '').lower()
+    key  = f"{code}_carry_forward"
+    val  = _get(key, None)
+    if val is not None:
+        if isinstance(val, bool):
+            return 1 if val else 0
+        if str(val).lower() in ('true', '1', 'yes'):
+            return 1
+        if str(val).lower() in ('false', '0', 'no'):
+            return 0
+    return -1

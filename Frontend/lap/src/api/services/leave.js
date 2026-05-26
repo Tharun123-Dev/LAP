@@ -16,5 +16,11 @@ export const cancelLeaveApi      = (id)        => api.post(ENDPOINTS.LEAVE.CANCE
 export const getAllRequestsApi   = (status, emp) => api.get(ENDPOINTS.LEAVE.ALL_REQUESTS, { params: { status, employee: emp } })
 export const leaveActionApi      = (id, action, note) => api.post(ENDPOINTS.LEAVE.ACTION(id), { action, note })
 
-// NEW — fetch prior usage before approving
+// fetch prior usage before approving
 export const getLeavePriorUsageApi = (id) => api.get(ENDPOINTS.LEAVE.PRIOR_USAGE(id))
+
+// Policy settings — synced between LeaveType model and SystemSettings
+// GET: returns effective values per leave type (system settings merged with model)
+// POST: saves a leave type's fields to BOTH model AND system settings
+export const getLeavePolicySettingsApi = ()           => api.get(ENDPOINTS.LEAVE.POLICY_SETTINGS)
+export const saveLeavePolicySettingApi = (id, fields) => api.post(ENDPOINTS.LEAVE.POLICY_SETTINGS, { leave_type_id: id, fields })
