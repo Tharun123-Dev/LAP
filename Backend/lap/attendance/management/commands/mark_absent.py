@@ -38,9 +38,14 @@ def get_prev_working_day(d):
         prev -= timedelta(days=1)
     return prev
 
-
 class Command(BaseCommand):
-    help = 'Auto-mark: missing check-out yesterday → half_day (0.5 LOP); no check-in today → absent'
+    help = (
+        'Auto-mark attendance:\n'
+        '- Missing checkout yesterday → ABSENT (1 full LOP)\n'
+        '- No check-in today → ABSENT (1 full LOP)\n'
+        '- Skips weekends, holidays, approved leaves\n'
+        '- Fully dynamic using System Settings'
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -51,25 +56,46 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from attendance.settings_helper import is_weekend
 
-        raw   = options.get('date')
+        from attendance.settings_helper import (
+            is_weekend,
+            get_auto_absent_enabled,
+        )
+
+        raw = options.get('date')
         today = date.fromisoformat(raw) if raw else date.today()
 
-        # Skip if today is weekend (settings-aware — supports 5 or 6 day week)
-        if is_weekend(today):
-            self.stdout.write(f'{today} is a weekend — nothing to do.')
+        # Dynamic setting
+        auto_absent_enabled = get_auto_absent_enabled()
+
+        # Auto absent disabled
+        if not auto_absent_enabled:
+            self.stdout.write(
+                'Auto absent disabled from System Settings.'
+            )
             return
 
-        # Skip if today is a public holiday
+        # Skip weekends
+        if is_weekend(today):
+            self.stdout.write(
+                f'{today} is a weekend — nothing to do.'
+            )
+            return
+
+        # Skip public holiday
         if Holiday.objects.filter(date=today).exists():
-            self.stdout.write(f'{today} is a public holiday — nothing to do.')
+            self.stdout.write(
+                f'{today} is a public holiday — nothing to do.'
+            )
             return
 
         yesterday = get_prev_working_day(today)
-        employees = User.objects.filter(is_active=True)
 
-        # ── Shared helpers ────────────────────────────────────────────────────
+        employees = User.objects.filter(
+            is_active=True
+        )
+
+        # Employees already on approved leave
         on_leave_today = set(
             LeaveRequest.objects.filter(
                 status='approved',
@@ -78,50 +104,81 @@ class Command(BaseCommand):
             ).values_list('employee_id', flat=True)
         )
 
+        # Existing attendance today
         already_marked_today = set(
             AttendanceRecord.objects.filter(
                 date=today
             ).values_list('employee_id', flat=True)
         )
 
-        # ── JOB 1: missing check-out yesterday → half_day on YESTERDAY ───────
+        # ─────────────────────────────────────────────
+        # JOB 1
+        # Missing checkout yesterday → FULL ABSENT
+        # ─────────────────────────────────────────────
+
         incomplete_yesterday = AttendanceRecord.objects.filter(
             date=yesterday,
             check_in__isnull=False,
             check_out__isnull=True,
-            status__in=['present', 'late', 'half_day'],
         ).select_related('employee')
 
         job1_marked = 0
+
         for rec in incomplete_yesterday:
+
             emp = rec.employee
+
             if not emp.is_active:
                 continue
 
-            rec.status       = 'half_day'
+            rec.status = 'absent'
             rec.hours_worked = 0
-            rec.note = (rec.note + ' | ' if rec.note else '') + \
-                       'CHECK-OUT MISSING — auto-converted to half day (0.5 LOP)'
-            rec.save(update_fields=['status', 'hours_worked', 'note'])
+            rec.ot_hours = 0
 
-            already_marked_today.add(emp.id)
+            rec.note = (
+                rec.note + ' | '
+                if rec.note else ''
+            ) + (
+                'AUTO ABSENT: missing checkout '
+                '→ full LOP deduction'
+            )
+
+            rec.save(update_fields=[
+                'status',
+                'hours_worked',
+                'ot_hours',
+                'note',
+            ])
+
             job1_marked += 1
 
             self.stdout.write(
-                f'  [MISSING CHECKOUT] {emp.get_full_name() or emp.username} '
-                f'— checked in {yesterday} but no checkout '
-                f'→ half_day on {yesterday} (0.5 LOP)'
+                f'  [AUTO ABSENT] '
+                f'{emp.get_full_name() or emp.username} '
+                f'— missing checkout on {yesterday} '
+                f'→ ABSENT (1 LOP)'
             )
 
-        # ── JOB 2: no check-in at all today → mark absent TODAY ──────────────
-        # Skip employees on approved leave — their attendance is set by LeaveActionView
+        # ─────────────────────────────────────────────
+        # JOB 2
+        # No check-in today → ABSENT
+        # ─────────────────────────────────────────────
+
         job2_marked = 0
+
         for emp in employees:
+
+            # Skip approved leave
             if emp.id in on_leave_today:
+
                 self.stdout.write(
-                    f'  [SKIP — ON LEAVE] {emp.get_full_name() or emp.username} on approved leave today'
+                    f'  [SKIP — ON LEAVE] '
+                    f'{emp.get_full_name() or emp.username}'
                 )
+
                 continue
+
+            # Already has attendance
             if emp.id in already_marked_today:
                 continue
 
@@ -130,19 +187,34 @@ class Command(BaseCommand):
                 date=today,
                 defaults={
                     'status': 'absent',
-                    'note':   'Auto-marked absent: no check-in recorded',
+                    'hours_worked': 0,
+                    'ot_hours': 0,
+                    'note': (
+                        'AUTO ABSENT: '
+                        'no check-in recorded '
+                        '→ full LOP deduction'
+                    ),
                 },
             )
+
             job2_marked += 1
+
             self.stdout.write(
-                f'  [ABSENT] {emp.get_full_name() or emp.username} — no check-in today'
+                f'  [ABSENT] '
+                f'{emp.get_full_name() or emp.username} '
+                f'— no check-in today '
+                f'→ ABSENT (1 LOP)'
             )
+
+        # ─────────────────────────────────────────────
+        # FINAL SUMMARY
+        # ─────────────────────────────────────────────
 
         self.stdout.write(
             self.style.SUCCESS(
-                f'\n{today} done — '
-                f'{job1_marked} half_day (missing checkout on {yesterday}) + '
-                f'{job2_marked} absent (no check-in today) = '
-                f'{job1_marked + job2_marked} total marked.'
+                f'\n{today} completed:\n'
+                f'  Missing checkout → {job1_marked} absent\n'
+                f'  No check-in      → {job2_marked} absent\n'
+                f'  Total marked     → {job1_marked + job2_marked}'
             )
         )

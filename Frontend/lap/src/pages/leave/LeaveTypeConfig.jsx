@@ -2,7 +2,12 @@
 // FIX: After adding/editing a leave type, automatically syncs balances for
 //      all employees. Shows sync result (created/updated) to the admin.
 import { useEffect, useState } from 'react'
-import { getLeaveTypesApi, createLeaveTypeApi, updateLeaveTypeApi } from '../../api/services/leave'
+import {
+  getLeaveTypesApi,
+  createLeaveTypeApi,
+  updateLeaveTypeApi,
+  deleteLeaveTypeApi,
+} from '../../api/services/leave'
 import toast from 'react-hot-toast'
 
 const EMPTY = {
@@ -69,6 +74,30 @@ export default function LeaveTypeConfig() {
       toast.error(err?.name?.[0] || err?.code?.[0] || 'Save failed')
     } finally { setSaving(false) }
   }
+  const handleDelete = async (t) => {
+
+  const ok = window.confirm(
+    `Delete "${t.name}" leave type?`
+  )
+
+  if (!ok) return
+
+  try {
+
+    await deleteLeaveTypeApi(t.id)
+
+    toast.success('Leave type deleted')
+
+    load()
+
+  } catch (e) {
+
+    toast.error(
+      e?.response?.data?.error ||
+      'Delete failed'
+    )
+  }
+}
 
   return (
     <div>
@@ -126,9 +155,45 @@ export default function LeaveTypeConfig() {
 
               {t.description && <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>{t.description}</p>}
 
-              <button onClick={() => openEdit(t)} style={{ padding: '7px', background: '#f3f4f6', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 500, marginTop: 'auto' }}>
-                Edit
-              </button>
+              <div style={{
+  display: 'flex',
+  gap: '8px',
+  marginTop: 'auto',
+}}>
+
+  <button
+    onClick={() => openEdit(t)}
+    style={{
+      flex: 1,
+      padding: '7px',
+      background: '#f3f4f6',
+      border: 'none',
+      borderRadius: '6px',
+      fontSize: '12px',
+      cursor: 'pointer',
+      fontWeight: 500,
+    }}
+  >
+    Edit
+  </button>
+
+  <button
+    onClick={() => handleDelete(t)}
+    style={{
+      padding: '7px 12px',
+      background: '#fef2f2',
+      color: '#dc2626',
+      border: '1px solid #fecaca',
+      borderRadius: '6px',
+      fontSize: '12px',
+      cursor: 'pointer',
+      fontWeight: 600,
+    }}
+  >
+    Delete
+  </button>
+
+</div>
             </div>
           ))}
         </div>
@@ -156,7 +221,7 @@ export default function LeaveTypeConfig() {
                 <Field label="Days Allowed / Year">
                   <input type="number" min="0" value={form.days_allowed} onChange={setN('days_allowed')} style={inp} />
                 </Field>
-                {/* <Field label="Min Notice Days"><input type="number" min="0" value={form.min_notice_days} onChange={setN('min_notice_days')} style={inp} /></Field> */}
+                <Field label="Min Notice Days"><input type="number" min="0" value={form.min_notice_days} onChange={setN('min_notice_days')} style={inp} /></Field>
               </Row2>
               <Field label="Applicable To">
                 <select value={form.applicable_to} onChange={set('applicable_to')} style={inp}>
@@ -174,7 +239,7 @@ export default function LeaveTypeConfig() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 {[
                   { key: 'is_paid',           label: 'Paid Leave' },
-                  // { key: 'carry_forward',     label: 'Carry Forward' },
+                  { key: 'carry_forward',     label: 'Carry Forward' },
                   { key: 'requires_document', label: 'Document Required' },
                 ].map(toggle => (
                   <label key={toggle.key} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', cursor: 'pointer', background: '#f8fafc', padding: '9px 12px', borderRadius: '8px' }}>
@@ -183,11 +248,11 @@ export default function LeaveTypeConfig() {
                   </label>
                 ))}
               </div>
-              {/* {form.carry_forward && (
+              {form.carry_forward && (
                 <Field label="Max Carry Forward Days">
                   <input type="number" min="0" value={form.max_carry_forward} onChange={setN('max_carry_forward')} style={inp} />
                 </Field>
-              )} */}
+              )}
 
               {/* Sync notice */}
               <div style={{ background: '#eff6ff', borderRadius: '8px', padding: '10px 14px', fontSize: '12px', color: '#1e40af' }}>

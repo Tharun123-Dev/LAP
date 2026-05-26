@@ -17,7 +17,7 @@ export default function BalanceDashboard() {
   const [refreshKey,    setRefreshKey]   = useState(0)
   const [lowThreshold,  setLowThreshold] = useState(2)
   const [encashEnabled, setEncashEnabled]= useState(false)
-  const [elMaxCF,       setElMaxCF]      = useState(45)
+
 
   useEffect(() => {
     systemSettingsService.getAll().then(res => {
@@ -27,8 +27,7 @@ export default function BalanceDashboard() {
       if (lt) setLowThreshold(parseInt(lt.value) || 2)
       const enc = find('leave_encashment_enabled')
       if (enc) setEncashEnabled(enc.value === 'true')
-      const cf = find('el_max_carry_forward')
-      if (cf) setElMaxCF(parseInt(cf.value) || 45)
+      
     }).catch(() => {})
   }, [])
 
@@ -217,7 +216,7 @@ export default function BalanceDashboard() {
                   {/* Encashment hint for EL */}
                   {encashEnabled && b.leave_type_code === 'EL' && remaining > 0 && (
                     <p style={{ margin: '8px 0 0', fontSize: '10px', color: '#7c3aed' }}>
-                      💡 EL encashment available at year-end. Max carry-forward: {elMaxCF} days.
+                      💡 EL encashment available at year-end. Max carry-forward: {b.max_carry_forward || 0} days
                     </p>
                   )}
                 </div>
@@ -237,7 +236,9 @@ export default function BalanceDashboard() {
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                 {cfLeaves.map(b => {
                   const remaining = parseFloat(b.remaining || 0)
-                  const maxCF     = b.leave_type_code === 'EL' ? elMaxCF : parseFloat(b.max_carry_forward || 0)
+                  const maxCF = parseFloat(
+  b.max_carry_forward || 0
+)
                   const estimated = Math.min(remaining, maxCF)
                   return (
                     <div key={b.id} style={{ background: '#fff', borderRadius: '8px', padding: '10px 14px', minWidth: '140px' }}>

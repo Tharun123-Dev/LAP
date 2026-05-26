@@ -19,6 +19,18 @@ def _get(key, default):
     return default
 
 
+def _parse_bool(val) -> bool:
+    """
+    Safely coerce any value (bool, 'true', 'false', 'True', 'False', 1, 0, ...)
+    to a Python bool.  Plain bool() incorrectly returns True for 'false'.
+    """
+    if isinstance(val, bool):
+        return val
+    if str(val).lower() in ('false', '0', 'no', 'off'):
+        return False
+    return bool(val)
+
+
 # ── ATTENDANCE ────────────────────────────────────────────────────────────────
 
 def get_shift_start() -> time:
@@ -64,11 +76,17 @@ def get_regularization_window() -> int:
 
 
 def get_wfh_enabled() -> bool:
-    return bool(_get('wfh_enabled', True))
+    return _parse_bool(_get('wfh_enabled', True))
 
 
 def get_auto_absent_enabled() -> bool:
-    return bool(_get('auto_absent_enabled', True))
+    """
+    Returns True if the system should auto-mark absent employees.
+    FIX: Uses _parse_bool() instead of bool() so that a stored value
+    of 'false' / 'False' / '0' is correctly returned as False —
+    plain bool('false') would wrongly return True.
+    """
+    return _parse_bool(_get('auto_absent_enabled', True))
 
 
 def get_weekend_days() -> list:
@@ -192,12 +210,10 @@ def get_carry_forward_month() -> int:
     return int(_get('carry_forward_month', 1))
 
 
-def get_el_max_carry_forward() -> int:
-    return int(_get('el_max_carry_forward', 45))
 
 
 def get_half_day_leave_enabled() -> bool:
-    return bool(_get('half_day_leave_enabled', True))
+    return _parse_bool(_get('half_day_leave_enabled', True))
 
 
 def get_leave_low_threshold() -> int:
@@ -205,7 +221,7 @@ def get_leave_low_threshold() -> int:
 
 
 def get_sandwich_rule() -> bool:
-    return bool(_get('sandwich_rule_enabled', True))
+    return _parse_bool(_get('sandwich_rule_enabled', True))
 
 
 # ── GENERAL ───────────────────────────────────────────────────────────────────

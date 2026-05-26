@@ -7,6 +7,14 @@ ADDED:
   sync_balances_for_leave_type() — called whenever a LeaveType is created
   or its days_allowed is changed, so all existing employee LeaveBalance rows
   stay in sync without requiring manual admin action.
+
+FIX: process_carry_forward() now respects the system-settings override for
+     carry_forward (e.g. cl_carry_forward = false disables CL carry-forward
+     even if LeaveType.carry_forward is True on the model).
+
+FIX: get_leave_balance_summary() now returns the effective carry_forward
+     flag (system settings win over model), so the frontend calendar
+     estimation and BalanceDashboard correctly show/hide the CF section.
 """
 from datetime import date, timedelta
 from .models import LeaveBalance, LeaveType
@@ -142,18 +150,32 @@ def sync_balances_for_leave_type(leave_type: LeaveType, year: int = None) -> dic
     return {'created': created, 'updated': updated, 'skipped': skipped, 'year': year}
 
 
+def _effective_carry_forward(lt: LeaveType) -> bool:
+    """
+    Fully dynamic carry-forward from LeaveTypeConfig only.
+    No System Settings dependency.
+    """
+    return bool(
+        lt.carry_forward
+    )
+
 def process_carry_forward(year: int = None) -> dict:
     """
     Year-end carry-forward engine.
     Called for year Y:
-      - For each employee, for each leave type with carry_forward=True:
+      - For each employee, for each leave type with carry_forward=True
+        (respecting system-settings override via _effective_carry_forward):
           carried = min(prev_year.remaining, lt.max_carry_forward)
       - Creates/updates next-year balance row with carried amount added to total.
       - Marks prev_year balance as processed (carried field updated).
 
+    FIX: carry_forward is now evaluated via _effective_carry_forward() so
+         a system-settings override of cl_carry_forward=false actually
+         disables CL carry-forward even if the LeaveType model flag is True.
+
     Returns summary dict with counts.
     """
-    from attendance.settings_helper import get_el_max_carry_forward
+
 
     if year is None:
         year = date.today().year  # year = the year ENDING (carry FROM this year TO next)
@@ -162,16 +184,19 @@ def process_carry_forward(year: int = None) -> dict:
     processed = 0
     skipped   = 0
 
-    carry_types = LeaveType.objects.filter(is_active=True, carry_forward=True)
+    # Start with ALL active leave types — filter by effective carry_forward below
+    all_leave_types = LeaveType.objects.filter(is_active=True)
+
+    # Only process types where carry_forward is effectively True
+    carry_types = [lt for lt in all_leave_types if _effective_carry_forward(lt)]
 
     for lt in carry_types:
         # Global cap from settings for EL; use lt.max_carry_forward for others
-        if lt.code in ('EL', 'PL', 'AL'):
-            global_cap = get_el_max_carry_forward()
-            effective_cap = min(lt.max_carry_forward, global_cap) if lt.max_carry_forward > 0 else global_cap
-        else:
-            effective_cap = lt.max_carry_forward
+        # Fully dynamic carry forward from LeaveTypeConfig only
 
+        effective_cap = float(
+    lt.max_carry_forward or 0
+)
         prev_balances = LeaveBalance.objects.filter(leave_type=lt, year=year)
 
         for prev_bal in prev_balances:
@@ -212,6 +237,11 @@ def process_carry_forward(year: int = None) -> dict:
 def get_leave_balance_summary(employee, year: int) -> list:
     """
     Returns balance rows for employee/year including carry-forward details.
+
+    FIX: carry_forward is now the effective value (system settings win over
+         model), so the frontend calendar estimation and BalanceDashboard
+         carry-forward section correctly appear/disappear based on the
+         system setting (e.g. cl_carry_forward=false hides CL from CF display).
     """
     balances = LeaveBalance.objects.filter(
         employee=employee, year=year,
@@ -229,13 +259,16 @@ def get_leave_balance_summary(employee, year: int) -> list:
         this_year_remaining = max(min(remaining, base), 0)
         cf_remaining        = max(remaining - this_year_remaining, 0)
 
+        # FIX: use effective carry_forward (system settings override > model)
+        eff_carry_forward = _effective_carry_forward(bal.leave_type)
+
         result.append({
             'id':              bal.id,
             'leave_type_id':   bal.leave_type.id,
             'leave_type_name': bal.leave_type.name,
             'leave_type_code': bal.leave_type.code,
             'is_paid':         bal.leave_type.is_paid,
-            'carry_forward':   bal.leave_type.carry_forward,
+            'carry_forward':   eff_carry_forward,   # FIX: effective value, not raw model
             'max_carry_forward': bal.leave_type.max_carry_forward,
             'year':            year,
             'base_allocation': base,

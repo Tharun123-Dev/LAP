@@ -5,7 +5,7 @@ from .views import (
     MyLeaveBalanceView, InitBalanceView, CarryForwardView,
     ApplyLeaveView, MyLeaveRequestsView, CancelLeaveView,
     AllLeaveRequestsView, LeaveActionView,
-    LeavePriorUsageView, LeavePolicySettingsView,
+    LeavePriorUsageView, LeavePolicySettingsView,DeleteLeaveTypeView
 )
 
 urlpatterns = [
@@ -21,4 +21,8 @@ urlpatterns = [
     path('leave/<int:pk>/action/',      LeaveActionView.as_view()),
     path('leave/<int:pk>/prior-usage/', LeavePriorUsageView.as_view()),
     path('leave/policy-settings/',      LeavePolicySettingsView.as_view()),  # NEW — system settings sync
+    path(
+    'leave/types/<int:pk>/',
+    DeleteLeaveTypeView.as_view()
+),
 ]

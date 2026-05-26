@@ -5,60 +5,195 @@ from django.db import models
 from django.db import models
 from accounts.models import User
 
-
 class SalaryStructure(models.Model):
-    employee       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='salary_structures')
-    effective_date = models.DateField()
-    ctc            = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
-    # Earnings
-    basic          = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    hra            = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    da             = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    special_allowance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    transport      = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    medical        = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    other_allowance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-
-    # Deductions (employee share)
-    pf_employee    = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    esi_employee   = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    pt             = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # professional tax
-
-    # Employer contributions (not deducted from salary but used for CTC)
-    pf_employer    = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    esi_employer   = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-
-    is_active      = models.BooleanField(default=True)
-    created_by     = models.ForeignKey(
-        User, null=True, blank=True,
-        on_delete=models.SET_NULL, related_name='created_structures'
+    employee = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='salary_structures'
     )
-    created_at     = models.DateTimeField(auto_now_add=True)
-    updated_at     = models.DateTimeField(auto_now=True)
+
+    effective_date = models.DateField()
+
+    ctc = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0
+    )
+
+    # Dynamic Percentage Configuration
+    basic_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=40
+    )
+
+    hra_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=50
+    )
+
+    da_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=10
+    )
+
+    pf_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=12
+    )
+
+    esi_percent = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.75
+    )
+
+    # Fixed Allowances
+    transport = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1600
+    )
+
+    medical = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1250
+    )
+
+    other_allowance = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0
+    )
+
+    # Professional Tax
+    pt = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=200
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='created_structures'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-effective_date']
 
     def __str__(self):
-        return f"{self.employee.username} | {self.effective_date} | CTC {self.ctc}"
+        return (
+            f"{self.employee.username} | "
+            f"{self.effective_date} | "
+            f"CTC {self.ctc}"
+        )
+
+    @property
+    def monthly_ctc(self):
+
+        return self.ctc / 12
+
+    @property
+    def basic(self):
+
+        return (
+            self.monthly_ctc *
+            self.basic_percent /
+            100
+        )
+
+    @property
+    def hra(self):
+
+        return (
+            self.basic *
+            self.hra_percent /
+            100
+        )
+
+    @property
+    def da(self):
+
+        return (
+            self.basic *
+            self.da_percent /
+            100
+        )
+
+    @property
+    def special_allowance(self):
+
+        return (
+            self.monthly_ctc
+            - self.basic
+            - self.hra
+            - self.da
+            - self.transport
+            - self.medical
+            - self.other_allowance
+        )
+
+    @property
+    def pf_employee(self):
+
+        return (
+            self.basic *
+            self.pf_percent /
+            100
+        )
+
+    @property
+    def esi_employee(self):
+
+        return (
+            self.gross *
+            self.esi_percent /
+            100
+        )
 
     @property
     def gross(self):
+
         return (
-            self.basic + self.hra + self.da +
-            self.special_allowance + self.transport +
-            self.medical + self.other_allowance
+            self.basic
+            + self.hra
+            + self.da
+            + self.special_allowance
+            + self.transport
+            + self.medical
+            + self.other_allowance
         )
 
     @property
     def total_deductions(self):
-        return self.pf_employee + self.esi_employee + self.pt
+
+        return (
+            self.pf_employee
+            + self.esi_employee
+            + self.pt
+        )
 
     @property
     def net_pay(self):
-        return self.gross - self.total_deductions
 
+        return (
+            self.gross
+            - self.total_deductions
+        )
 
 class PayrollRun(models.Model):
     STATUS_CHOICES = [

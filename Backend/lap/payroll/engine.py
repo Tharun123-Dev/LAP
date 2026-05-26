@@ -112,66 +112,134 @@ def calculate_ot_pay(basic: Decimal, working_days: int, ot_hours: Decimal) -> De
 
 def get_attendance_summary(employee, year, month):
     _, days_in_month = calendar.monthrange(year, month)
-    records    = AttendanceRecord.objects.filter(employee=employee, date__year=year, date__month=month)
+
+    records = AttendanceRecord.objects.filter(
+        employee=employee,
+        date__year=year,
+        date__month=month
+    )
+
     record_map = {r.date: r for r in records}
-    paid_full_dates, paid_half_dates, lop_dates = get_approved_leave_dates(employee, year, month)
+
+    paid_full_dates, paid_half_dates, lop_dates = (
+        get_approved_leave_dates(employee, year, month)
+    )
 
     present = Decimal('0')
-    lop     = Decimal('0')
-    ot_hrs  = Decimal('0')
+    lop = Decimal('0')
+    ot_hrs = Decimal('0')
     late_count = 0
 
+    # Dynamic system setting
+    from attendance.settings_helper import get_auto_absent_enabled
+
+    auto_absent_enabled = get_auto_absent_enabled()
+
     for day in range(1, days_in_month + 1):
+
         d = date(year, month, day)
-        if is_weekend(d):       # dynamic — works for 5 or 6 day week
+
+        # Skip weekends
+        if is_weekend(d):
             continue
 
         rec = record_map.get(d)
+
+        # ─────────────────────────────────────────────
+        # Attendance record exists
+        # ─────────────────────────────────────────────
         if rec:
-            if rec.status == 'present':
+
+            status = str(rec.status).lower()
+
+            # PRESENT
+            if status == 'present':
                 present += Decimal('1')
-            elif rec.status == 'late':
+
+            # LATE
+            elif status == 'late':
                 present += Decimal('1')
                 late_count += 1
-            elif rec.status == 'half_day':
+
+            # HALF DAY
+            elif status == 'half_day':
+
                 if d in paid_full_dates or d in paid_half_dates:
                     present += Decimal('1')
+
                 else:
                     present += Decimal('0.5')
-                    lop     += Decimal('0.5')
-            elif rec.status == 'absent':
+                    lop += Decimal('0.5')
+
+            # ABSENT / AUTO ABSENT / LOP
+            elif status in [
+                'absent',
+                'auto_absent',
+                'lop',
+            ]:
+
                 if d in paid_full_dates or d in paid_half_dates:
                     present += Decimal('1')
+
                 else:
-                    lop += Decimal('1')
-            elif rec.status in ('leave', 'lop_leave'):
+
+                    # Dynamic policy
+                    if auto_absent_enabled:
+                        lop += Decimal('1')
+
+                    else:
+                        pass
+
+            # LEAVE
+            elif status in ('leave', 'lop_leave'):
+
                 if d in lop_dates:
                     lop += Decimal('1')
+
                 else:
                     present += Decimal('1')
-            elif rec.status == 'holiday':
+
+            # HOLIDAY
+            elif status == 'holiday':
                 present += Decimal('1')
 
+            # OT HOURS
             if rec.ot_hours:
                 ot_hrs += Decimal(str(rec.ot_hours))
+
+        # ─────────────────────────────────────────────
+        # No attendance record
+        # ─────────────────────────────────────────────
         else:
+
+            # Paid leave
             if d in paid_full_dates or d in paid_half_dates:
                 present += Decimal('1')
+
+            # LOP leave
             elif d in lop_dates:
                 lop += Decimal('1')
+
+            # Missing attendance
             else:
-                lop += Decimal('1')
+
+                # Auto absent enabled
+                if auto_absent_enabled:
+                    lop += Decimal('1')
+
+                # Ignore day completely
+                else:
+                    pass
 
     late_lop = calculate_late_lop(late_count)
+
     return {
-        'present':    present,
-        'lop_days':   lop,
-        'late_lop':   late_lop,
+        'present': present,
+        'lop_days': lop,
+        'late_lop': late_lop,
         'late_count': late_count,
-        'ot_hours':   ot_hrs,
+        'ot_hours': ot_hrs,
     }
-
-
 # ── Main Engine ───────────────────────────────────────────────────────────────
 
 def process_payroll_run(payroll_run: PayrollRun):

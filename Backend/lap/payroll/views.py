@@ -53,11 +53,43 @@ class CreateSalaryStructureView(APIView):
                 {'error': 'Employee not found'},
                 status=404
             )
-
         data = {
-            k: (v if v != '' else '0')
-            for k, v in request.data.items()
-        }
+
+    'employee': emp.id,
+
+    'effective_date':
+        request.data.get('effective_date'),
+
+    'ctc':
+        request.data.get('ctc', 0),
+
+    'basic_percent':
+        request.data.get('basic_percent', 40),
+
+    'hra_percent':
+        request.data.get('hra_percent', 50),
+
+    'da_percent':
+        request.data.get('da_percent', 10),
+
+    'pf_percent':
+        request.data.get('pf_percent', 12),
+
+    'esi_percent':
+        request.data.get('esi_percent', 0.75),
+
+    'transport':
+        request.data.get('transport', 1600),
+
+    'medical':
+        request.data.get('medical', 1250),
+
+    'other_allowance':
+        request.data.get('other_allowance', 0),
+
+    'pt':
+        request.data.get('pt', 200),
+}
 
         # ── CTC validation ─────────────────────────────
         try:

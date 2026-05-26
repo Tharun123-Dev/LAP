@@ -170,80 +170,178 @@ class CarryForwardView(APIView):
 
 
 # ── APPLY LEAVE ───────────────────────────────────────────────────────────────
-
 class ApplyLeaveView(APIView):
     permission_classes = [make_permission('apply_leave')]
 
     def post(self, request):
-        lt_id     = request.data.get('leave_type')
+
+        lt_id = request.data.get('leave_type')
         start_str = request.data.get('start_date')
-        end_str   = request.data.get('end_date')
-        session   = request.data.get('session', 'full')
-        reason    = request.data.get('reason', '').strip()
+        end_str = request.data.get('end_date')
+        session = request.data.get('session', 'full')
+        reason = request.data.get('reason', '').strip()
+
+        # ─────────────────────────────────────────────
+        # Required fields validation
+        # ─────────────────────────────────────────────
 
         if not all([lt_id, start_str, end_str, reason]):
-            return Response(
-                {'error': 'leave_type, start_date, end_date, reason are required'},
-                status=400,
-            )
+
+            return Response({
+                'error': (
+                    'leave_type, start_date, '
+                    'end_date, reason are required'
+                )
+            }, status=400)
+
+        # ─────────────────────────────────────────────
+        # Date parsing
+        # ─────────────────────────────────────────────
 
         try:
             start = date.fromisoformat(start_str)
-            end   = date.fromisoformat(end_str)
+            end = date.fromisoformat(end_str)
+
         except ValueError:
-            return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=400)
 
-        if end < start:
-            return Response({'error': 'end_date must be after start_date'}, status=400)
-
-        try:
-            lt = LeaveType.objects.get(pk=lt_id, is_active=True)
-        except LeaveType.DoesNotExist:
-            return Response({'error': 'Leave type not found'}, status=404)
-
-        # Notice period check
-        from attendance.settings_helper import get_leave_advance_notice_days
-        system_notice = get_leave_advance_notice_days(lt.code)
-        effective_notice = system_notice if system_notice > 0 else lt.min_notice_days
-        if effective_notice > 0:
-            notice_days = count_working_days(date.today(), start)
-            if notice_days < effective_notice:
-                return Response({
-                    'error': f'{lt.name} requires {effective_notice} working day(s) advance notice. '
-                             f'Please apply at least {effective_notice} working day(s) before the leave date.'
-                }, status=400)
-
-        days = count_working_days(start, end, session)
-
-        year    = date.today().year
-        balance = get_or_create_balance(request.user, lt, year)
-
-        if balance.remaining < days:
             return Response({
-                'error': f'Insufficient balance. Available: {balance.remaining} day(s), Requested: {days}'
+                'error': 'Invalid date format. Use YYYY-MM-DD'
             }, status=400)
 
-        # Monthly cap check (for CL)
+        # ─────────────────────────────────────────────
+        # Date validation
+        # ─────────────────────────────────────────────
+
+        if end < start:
+
+            return Response({
+                'error': 'end_date must be after start_date'
+            }, status=400)
+
+        # ─────────────────────────────────────────────
+        # Leave type validation
+        # ─────────────────────────────────────────────
+
         try:
+
+            lt = LeaveType.objects.get(
+                pk=lt_id,
+                is_active=True
+            )
+
+        except LeaveType.DoesNotExist:
+
+            return Response({
+                'error': 'Leave type not found'
+            }, status=404)
+
+        # ─────────────────────────────────────────────
+        # FULLY DYNAMIC NOTICE PERIOD
+        # Source = LeaveTypeConfig only
+        # ─────────────────────────────────────────────
+
+        effective_notice = int(
+            lt.min_notice_days or 0
+        )
+
+        if effective_notice > 0:
+
+            notice_days = count_working_days(
+                date.today(),
+                start
+            )
+
+            if notice_days < effective_notice:
+
+                return Response({
+                    'error': (
+                        f'{lt.name} requires '
+                        f'{effective_notice} working day(s) '
+                        f'advance notice. '
+                        f'Please apply at least '
+                        f'{effective_notice} working day(s) '
+                        f'before the leave date.'
+                    )
+                }, status=400)
+
+        # ─────────────────────────────────────────────
+        # Working days calculation
+        # ─────────────────────────────────────────────
+
+        days = count_working_days(
+            start,
+            end,
+            session
+        )
+
+        # ─────────────────────────────────────────────
+        # Leave balance check
+        # ─────────────────────────────────────────────
+
+        year = date.today().year
+
+        balance = get_or_create_balance(
+            request.user,
+            lt,
+            year
+        )
+
+        if balance.remaining < days:
+
+            return Response({
+                'error': (
+                    f'Insufficient balance. '
+                    f'Available: {balance.remaining} day(s), '
+                    f'Requested: {days}'
+                )
+            }, status=400)
+
+        # ─────────────────────────────────────────────
+        # Monthly cap check (dynamic)
+        # ─────────────────────────────────────────────
+
+        try:
+
             from attendance.settings_helper import _get
-            cl_cap = int(_get('cl_monthly_cap', 0))
+
+            cl_cap = int(
+                _get('cl_monthly_cap', 0)
+            )
+
             if lt.code == 'CL' and cl_cap > 0:
+
                 this_month_used = LeaveRequest.objects.filter(
                     employee=request.user,
                     leave_type=lt,
                     start_date__year=start.year,
                     start_date__month=start.month,
                     status__in=['approved', 'pending'],
-                ).exclude(pk=0)
-                total_this_month = sum(float(r.days) for r in this_month_used) + days
+                )
+
+                total_this_month = (
+                    sum(float(r.days) for r in this_month_used)
+                    + days
+                )
+
                 if total_this_month > cl_cap:
+
                     return Response({
-                        'error': f'CL monthly cap is {cl_cap} day(s). You have already used/applied for {total_this_month - days} day(s) this month.'
+                        'error': (
+                            f'CL monthly cap is '
+                            f'{cl_cap} day(s). '
+                            f'You already used/applied '
+                            f'for {total_this_month - days} '
+                            f'day(s) this month.'
+                        )
                     }, status=400)
+
         except Exception:
             pass
 
+        # ─────────────────────────────────────────────
         # Overlap check
+        # ─────────────────────────────────────────────
+
         overlap = LeaveRequest.objects.filter(
             employee=request.user,
             status__in=['pending', 'approved'],
@@ -252,10 +350,17 @@ class ApplyLeaveView(APIView):
         ).exists()
 
         if overlap:
-            return Response(
-                {'error': 'You already have a leave request overlapping these dates'},
-                status=400,
-            )
+
+            return Response({
+                'error': (
+                    'You already have a leave request '
+                    'overlapping these dates'
+                )
+            }, status=400)
+
+        # ─────────────────────────────────────────────
+        # Create leave request
+        # ─────────────────────────────────────────────
 
         leave = LeaveRequest.objects.create(
             employee=request.user,
@@ -265,15 +370,27 @@ class ApplyLeaveView(APIView):
             days=days,
             session=session,
             reason=reason,
-            doc_url=request.data.get('doc_url', ''),
+            doc_url=request.data.get(
+                'doc_url',
+                ''
+            ),
         )
+
+        # ─────────────────────────────────────────────
+        # Update pending balance
+        # ─────────────────────────────────────────────
 
         balance.pending += days
         balance.save()
 
-        return Response(LeaveRequestSerializer(leave).data, status=status.HTTP_201_CREATED)
+        # ─────────────────────────────────────────────
+        # Response
+        # ─────────────────────────────────────────────
 
-
+        return Response(
+            LeaveRequestSerializer(leave).data,
+            status=status.HTTP_201_CREATED
+        )
 # ── MY LEAVE REQUESTS ─────────────────────────────────────────────────────────
 
 class MyLeaveRequestsView(APIView):
@@ -540,9 +657,11 @@ class LeavePolicySettingsView(APIView):
             eff_paid = (sys_paid == 1) if sys_paid >= 0 else lt.is_paid
 
             # carry_forward: system setting wins if set
-            sys_cf = get_leave_carry_forward(code)
-            eff_cf = (sys_cf == 1) if sys_cf >= 0 else lt.carry_forward
+            # Fully dynamic carry forward from LeaveTypeConfig only
 
+            eff_cf = bool(
+    lt.carry_forward
+)
             result.append({
                 'id':                  lt.id,
                 'name':                lt.name,
@@ -676,4 +795,28 @@ class LeavePolicySettingsView(APIView):
             'leave_type_id':    lt.id,
             'updated_fields':   list(set(updated_model_fields)),
             'synced_settings':  updated_settings,
+        })
+    
+
+class DeleteLeaveTypeView(APIView):
+
+    permission_classes = [
+        make_permission('configure_leave')
+    ]
+
+    def delete(self, request, pk):
+
+        try:
+            lt = LeaveType.objects.get(pk=pk)
+
+        except LeaveType.DoesNotExist:
+
+            return Response({
+                'error': 'Leave type not found'
+            }, status=404)
+
+        lt.delete()
+
+        return Response({
+            'message': 'Leave type deleted successfully'
         })

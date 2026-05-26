@@ -7,11 +7,32 @@ import toast from 'react-hot-toast'
 const fmt = v => `₹${parseFloat(v||0).toLocaleString('en-IN')}`
 
 const EMPTY = {
-  employee: '', effective_date: new Date().toISOString().split('T')[0],
-  ctc: '', basic: '', hra: '', da: '', special_allowance: '',
-  transport: '', medical: '', other_allowance: '',
-  pf_employee: '', esi_employee: '', pt: '',
-  pf_employer: '', esi_employer: '',
+
+  employee: '',
+
+  effective_date: new Date()
+    .toISOString()
+    .split('T')[0],
+
+  ctc: '',
+
+  basic_percent: '40',
+
+  hra_percent: '50',
+
+  da_percent: '10',
+
+  pf_percent: '12',
+
+  esi_percent: '0.75',
+
+  transport: '1600',
+
+  medical: '1250',
+
+  other_allowance: '0',
+
+  pt: '200',
 }
 
 export default function SalaryConfig() {
@@ -46,6 +67,7 @@ export default function SalaryConfig() {
       toast.error(e.response?.data?.error || 'Failed to save')
     } finally { setSaving(false) }
   }
+  
 
   const filtered = empFilter
     ? structures.filter(s => s.employee === parseInt(empFilter))
@@ -137,14 +159,64 @@ export default function SalaryConfig() {
                 <input type="number" value={form.ctc} onChange={setN('ctc')} style={inp} placeholder="720000" />
               </F>
               <Sect title="Monthly Earnings">
-                <Grid2>
-                  <F label="Basic *"><input type="number" value={form.basic} onChange={setN('basic')} style={inp} placeholder="24000" /></F>
-                  <F label="HRA"><input type="number" value={form.hra} onChange={setN('hra')} style={inp} placeholder="12000" /></F>
-                  <F label="DA"><input type="number" value={form.da} onChange={setN('da')} style={inp} placeholder="2400" /></F>
-                  <F label="Special Allowance"><input type="number" value={form.special_allowance} onChange={setN('special_allowance')} style={inp} placeholder="10000" /></F>
-                  <F label="Transport"><input type="number" value={form.transport} onChange={setN('transport')} style={inp} placeholder="1600" /></F>
-                  <F label="Medical"><input type="number" value={form.medical} onChange={setN('medical')} style={inp} placeholder="1250" /></F>
-                </Grid2>
+               <Grid2>
+
+  <F label="Basic %">
+
+    <input
+      type="number"
+      value={form.basic_percent}
+      onChange={setN('basic_percent')}
+      style={inp}
+    />
+
+  </F>
+
+  <F label="HRA %">
+
+    <input
+      type="number"
+      value={form.hra_percent}
+      onChange={setN('hra_percent')}
+      style={inp}
+    />
+
+  </F>
+
+  <F label="DA %">
+
+    <input
+      type="number"
+      value={form.da_percent}
+      onChange={setN('da_percent')}
+      style={inp}
+    />
+
+  </F>
+
+  <F label="PF %">
+
+    <input
+      type="number"
+      value={form.pf_percent}
+      onChange={setN('pf_percent')}
+      style={inp}
+    />
+
+  </F>
+
+  <F label="ESI %">
+
+    <input
+      type="number"
+      value={form.esi_percent}
+      onChange={setN('esi_percent')}
+      style={inp}
+    />
+
+  </F>
+
+</Grid2>
               </Sect>
               <Sect title="Monthly Deductions">
                 <Grid2>

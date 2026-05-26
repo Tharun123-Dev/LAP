@@ -17,8 +17,7 @@ export default function ApplyLeave({ onApplied }) {
   const [halfDayEnabled, setHalfDayEnabled] = useState(true)
   const [clMonthCap,     setClMonthCap]     = useState(0)
   const [slDocDays,      setSlDocDays]      = useState(2)
-  // ── advance notice per leave code — loaded from SystemSettings ──────────────
-  const [advanceNoticeDays, setAdvanceNoticeDays] = useState({}) // { CL: 2, SL: 0, ... }
+
 
   useEffect(() => {
     getLeaveTypesApi().then(r => setTypes(r.data)).catch(() => {})
@@ -40,12 +39,7 @@ export default function ApplyLeave({ onApplied }) {
       const slDoc = find('sl_doc_required_after_days')
       if (slDoc) setSlDocDays(parseInt(slDoc.value) || 2)
 
-      // ── Read advance notice days per leave type ──────────────────────────
-      const clNotice = find('cl_advance_notice_days')
-      setAdvanceNoticeDays(prev => ({
-        ...prev,
-        CL: clNotice ? (parseInt(clNotice.value) || 0) : 0,
-      }))
+    
     }).catch(() => {})
   }, [])
 
@@ -85,12 +79,14 @@ export default function ApplyLeave({ onApplied }) {
   const isClOverCap = selectedType?.code === 'CL' && clMonthCap > 0
 
   // ── Advance notice validation ─────────────────────────────────────────────
-  const getAdvanceNoticeRequired = () => {
-    if (!selectedType) return 0
-    // System Settings takes priority over LeaveType.min_notice_days
-    const fromSettings = advanceNoticeDays[selectedType.code] ?? 0
-    return fromSettings > 0 ? fromSettings : (selectedType.min_notice_days || 0)
-  }
+ // Fully dynamic from LeaveTypeConfig only
+const getAdvanceNoticeRequired = () => {
+  if (!selectedType) return 0
+
+  return Number(
+    selectedType.min_notice_days || 0
+  )
+}
 
   const advanceNoticeRequired = getAdvanceNoticeRequired()
 

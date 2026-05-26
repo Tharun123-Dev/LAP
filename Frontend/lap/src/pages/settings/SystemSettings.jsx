@@ -198,6 +198,29 @@ export default function SystemSettings() {
 const HIDDEN_KEYS = [
   'work_days_per_week',
   'regularization_window_days',
+   'cl_days_per_year',
+   'cl_is_paid',
+   'cl_advance_notice_days',
+   'comp_advance_notice_days',
+   'comp_days_per_year',
+   'comp_is_paid',
+   'el_days_per_year',
+   'el_advance_notice_days',
+   'el_max_carry_forward',
+   'nll_advance_notice_days',
+   'maternity_leave_days',
+   'nll_carry_forward',
+   'nll_days_per_year',
+   'nll_is_paid',
+   'paternity_leave_days',
+   'probation_earned_leave',
+   'sl_days_per_year',
+   'sl_advance_notice_days',
+   'sl_is_paid',
+   ''
+
+   
+
 ]
   const renderSetting = (setting) => {
     const isChanged = edits[setting.key] !== undefined
