@@ -20,9 +20,24 @@ from attendance.settings_helper import (
     get_basic_salary_percent, get_hra_metro_percent, get_hra_nonmetro_percent,
     get_da_percent, get_pf_employee_percent, get_pf_employer_percent,
     get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
-    get_payroll_lock_day, get_tds_flat_contract, get_pt_slabs,
+    get_payroll_lock_day, get_tds_flat_contract, get_pt_flat_amount,
     get_overtime_multiplier,
+    get_company_name, get_currency, get_fiscal_year_start_month, get_probation_months,
+    get_default_transport, get_default_medical, get_default_other_allowance,
+    get_default_pt, get_working_days_per_month, get_pt_flat_amount,
 )
+
+
+def _get_general(key, default=''):
+    """Read a general system setting directly."""
+    try:
+        from notifications.models import SystemSetting
+        s = SystemSetting.objects.filter(key=key).first()
+        if s:
+            return s.get_value()
+    except Exception:
+        pass
+    return default
 
 
 # ── PAYROLL SETTINGS DEFAULTS (for salary config auto-fill) ───────────────────
@@ -37,23 +52,125 @@ class PayrollSettingsDefaultsView(APIView):
 
     def get(self, request):
         return Response({
-            'basic_percent':       float(get_basic_salary_percent()),
-            'hra_percent_metro':   float(get_hra_metro_percent()),
-            'hra_percent_nonmetro': float(get_hra_nonmetro_percent()),
-            'da_percent':          float(get_da_percent()),
-            'pf_employee_percent': float(get_pf_employee_percent()),
-            'pf_employer_percent': float(get_pf_employer_percent()),
-            'esi_employee_percent': float(get_esi_employee_percent()),
-            'esi_employer_percent': float(get_esi_employer_percent()),
-            'esi_threshold':       float(get_esi_threshold()),
-            'payroll_lock_day':    get_payroll_lock_day(),
-            'tds_flat_contract':   float(get_tds_flat_contract()),
-            'overtime_multiplier': float(get_overtime_multiplier()),
-            'pt_slabs':            get_pt_slabs(),
+            'basic_percent':            float(get_basic_salary_percent()),
+            'hra_percent_metro':        float(get_hra_metro_percent()),
+            'hra_percent_nonmetro':     float(get_hra_nonmetro_percent()),
+            'da_percent':               float(get_da_percent()),
+            'pf_employee_percent':      float(get_pf_employee_percent()),
+            'pf_employer_percent':      float(get_pf_employer_percent()),
+            'esi_employee_percent':     float(get_esi_employee_percent()),
+            'esi_employer_percent':     float(get_esi_employer_percent()),
+            'esi_threshold':            float(get_esi_threshold()),
+            'payroll_lock_day':         get_payroll_lock_day(),
+            'tds_flat_contract':        float(get_tds_flat_contract()),
+            'overtime_multiplier':      float(get_overtime_multiplier()),
+            'pt_flat_amount':            float(get_pt_flat_amount()),
+            # Fixed allowance defaults — fully from System Settings
+            'default_transport':        float(get_default_transport()),
+            'default_medical':          float(get_default_medical()),
+            'default_other_allowance':  float(get_default_other_allowance()),
+            'default_pt':               float(get_default_pt()),
+            'working_days_per_month':   get_working_days_per_month(),
+            # General settings
+            'company_name':             get_company_name(),
+            'company_logo_url':         str(_get_general('company_logo_url', '')),
+            'currency':                 get_currency(),
+            'fiscal_year_start_month':  float(get_fiscal_year_start_month()),
+            'probation_period_months':  get_probation_months(),
         })
 
 
 # ── SALARY STRUCTURE ──────────────────────────────────────────────────────────
+
+def _serialize_structure(structure):
+    """
+    Serialize a SalaryStructure using the STORED percentages exactly as saved.
+    The list and MySalaryView show what was actually created — not overridden
+    by whatever the current system settings happen to be.
+    System settings are only used as FORM DEFAULTS when opening Assign Salary.
+    """
+    ctc       = float(structure.ctc)
+    monthly   = ctc / 12
+
+    # Use STORED percentages — exactly what was saved
+    basic_pct = float(structure.basic_percent) / 100
+    hra_pct   = float(structure.hra_percent)   / 100
+    da_pct    = float(structure.da_percent)    / 100
+    pf_pct    = float(structure.pf_percent)    / 100
+    esi_pct   = float(structure.esi_percent)   / 100
+
+    transport = float(structure.transport)
+    medical   = float(structure.medical)
+    other     = float(structure.other_allowance)
+    # PT: always show live system settings value (not stored structure value)
+    pt        = float(get_pt_flat_amount())
+
+    basic     = round(monthly * basic_pct, 2)
+    hra       = round(basic   * hra_pct, 2)
+    da        = round(basic   * da_pct, 2)
+    special   = round(max(monthly - basic - hra - da - transport - medical - other, 0), 2)
+    gross     = round(basic + hra + da + special + transport + medical + other, 2)
+
+    # Always use 21000 as ESI threshold minimum — system setting may be misconfigured
+    raw_threshold = float(get_esi_threshold())
+    esi_threshold = raw_threshold if raw_threshold >= 1000 else 21000
+    pf_emp    = round(basic * pf_pct, 2)
+    esi_exempt = gross > esi_threshold
+    esi_emp   = 0.0 if esi_exempt else round(gross * esi_pct, 2)
+    total_ded = round(pf_emp + esi_emp + pt, 2)
+    net_pay   = round(gross - total_ded, 2)
+
+    pf_er     = round(basic * float(get_pf_employer_percent())  / 100, 2)
+    esi_er    = 0.0 if esi_exempt else round(gross * float(get_esi_employer_percent()) / 100, 2)
+
+    try:
+        emp_name = structure.employee.get_full_name().strip() or structure.employee.username
+    except Exception:
+        emp_name = structure.employee.username
+
+    try:
+        emp_code = structure.employee.profile.emp_code
+    except Exception:
+        emp_code = ''
+
+    return {
+        'id':               structure.id,
+        'employee':         structure.employee_id,
+        'employee_name':    emp_name,
+        'emp_code':         emp_code,
+        'effective_date':   str(structure.effective_date),
+        'ctc':              ctc,
+        'monthly_ctc':      round(monthly, 2),
+        # stored percentages (exactly what was saved at creation)
+        'basic_percent':    float(structure.basic_percent),
+        'hra_percent':      float(structure.hra_percent),
+        'da_percent':       float(structure.da_percent),
+        'pf_percent':       float(structure.pf_percent),
+        'esi_percent':      float(structure.esi_percent),
+        # fixed allowances (stored)
+        'transport':        transport,
+        'medical':          medical,
+        'other_allowance':  other,
+        'pt':               pt,
+        # computed values
+        'basic':            basic,
+        'hra':              hra,
+        'da':               da,
+        'special_allowance': special,
+        'gross':            gross,
+        'pf_employee':      pf_emp,
+        'esi_employee':     esi_emp,
+        'esi_threshold':    esi_threshold,
+        'esi_exempt':       esi_exempt,
+        'total_deductions': total_ded,
+        'net_pay':          net_pay,
+        # employer contributions
+        'pf_employer':      pf_er,
+        'esi_employer':     esi_er,
+        'is_active':        structure.is_active,
+        'created_at':       str(structure.created_at),
+    }
+
 
 class SalaryStructureListView(APIView):
     permission_classes = [make_permission('view_salary')]
@@ -67,7 +184,9 @@ class SalaryStructureListView(APIView):
         if emp_id:
             qs = qs.filter(employee_id=emp_id)
 
-        return Response(SalaryStructureSerializer(qs, many=True).data)
+        # Serialize using STORED percentages — shows exactly what was created
+        data = [_serialize_structure(s) for s in qs]
+        return Response(data)
 
 
 class CreateSalaryStructureView(APIView):
@@ -84,28 +203,28 @@ class CreateSalaryStructureView(APIView):
         except User.DoesNotExist:
             return Response({'error': 'Employee not found'}, status=404)
 
-        # Use system settings as defaults if not provided
+        # Use system settings as defaults if not provided — zero hardcodes
         data = {
             'employee':        emp.id,
             'effective_date':  request.data.get('effective_date'),
             'ctc':             request.data.get('ctc', 0),
-            'basic_percent':   request.data.get('basic_percent', float(get_basic_salary_percent())),
-            'hra_percent':     request.data.get('hra_percent', float(get_hra_metro_percent())),
-            'da_percent':      request.data.get('da_percent', float(get_da_percent())),
-            'pf_percent':      request.data.get('pf_percent', float(get_pf_employee_percent())),
-            'esi_percent':     request.data.get('esi_percent', float(get_esi_employee_percent())),
-            'transport':       request.data.get('transport', 1600),
-            'medical':         request.data.get('medical', 1250),
-            'other_allowance': request.data.get('other_allowance', 0),
-            'pt':              request.data.get('pt', 200),
+            'basic_percent':   request.data.get('basic_percent',   float(get_basic_salary_percent())),
+            'hra_percent':     request.data.get('hra_percent',     float(get_hra_metro_percent())),
+            'da_percent':      request.data.get('da_percent',      float(get_da_percent())),
+            'pf_percent':      request.data.get('pf_percent',      float(get_pf_employee_percent())),
+            'esi_percent':     request.data.get('esi_percent',     float(get_esi_employee_percent())),
+            'transport':       request.data.get('transport',       float(get_default_transport())),
+            'medical':         request.data.get('medical',         float(get_default_medical())),
+            'other_allowance': request.data.get('other_allowance', float(get_default_other_allowance())),
+            'pt':              request.data.get('pt',              float(get_default_pt())),
         }
 
         # CTC validation
         try:
-            ctc    = Decimal(str(data.get('ctc', 0)))
-            basic_pct = Decimal(str(data.get('basic_percent', 40))) / Decimal('100')
-            hra_pct   = Decimal(str(data.get('hra_percent', 50)))   / Decimal('100')
-            da_pct    = Decimal(str(data.get('da_percent', 10)))    / Decimal('100')
+            ctc       = Decimal(str(data.get('ctc', 0)))
+            basic_pct = Decimal(str(data.get('basic_percent', float(get_basic_salary_percent())))) / Decimal('100')
+            hra_pct   = Decimal(str(data.get('hra_percent',   float(get_hra_metro_percent()))))    / Decimal('100')
+            da_pct    = Decimal(str(data.get('da_percent',    float(get_da_percent()))))           / Decimal('100')
             tr        = Decimal(str(data.get('transport', 0)))
             med       = Decimal(str(data.get('medical', 0)))
             oth       = Decimal(str(data.get('other_allowance', 0)))
@@ -168,7 +287,8 @@ class MySalaryStructureView(APIView):
         if not structure:
             return Response(None, status=200)
 
-        return Response(SalaryStructureSerializer(structure).data)
+        # Use stored percentages — show exactly what was assigned
+        return Response(_serialize_structure(structure))
 
 
 # ── PAYROLL RUNS ──────────────────────────────────────────────────────────────

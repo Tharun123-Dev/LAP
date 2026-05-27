@@ -241,11 +241,11 @@ SETTINGS = [
         description='Flat TDS % applied to contract employee gross. Regular employees use income slab TDS. Change here → next run uses new rate.',
     ),
     dict(
-        key='pt_slab_json',
-        value='[{"upto":15000,"pt":0},{"upto":20000,"pt":150},{"upto":99999999,"pt":200}]',
-        value_type='json', category='payroll',
-        label='Professional Tax Slabs (JSON)',
-        description='PT slabs: [{"upto": gross_amount, "pt": monthly_pt}]. Change any slab → next payroll run uses new PT slabs automatically.',
+        key='pt_flat_amount',
+        value='200',
+        value_type='integer', category='payroll',
+        label='Professional Tax (₹/month)',
+        description='Flat PT amount deducted per month. Enter 200 → deducts ₹200. Enter 100 → deducts ₹100. Enter 0 → no PT. Prorated by attendance days.',
     ),
 
     # ═══════════════ GENERAL ═══════════════

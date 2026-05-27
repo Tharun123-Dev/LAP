@@ -27,7 +27,7 @@ from attendance.settings_helper import (
     get_late_per_half_day, get_working_days_in_month, is_weekend,
     get_pf_employee_percent, get_pf_employer_percent,
     get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
-    get_tds_flat_contract, get_pt_slabs, get_overtime_multiplier,
+    get_tds_flat_contract, get_pt_slabs, get_pt_flat_amount, get_overtime_multiplier,
     get_da_percent, get_auto_absent_enabled,
 )
 from leave.models import LeaveRequest
@@ -82,14 +82,14 @@ def calculate_late_lop(late_count: int) -> Decimal:
     return Decimal(str(half_units)) * Decimal('0.5')
 
 
-def calculate_pt(gross: Decimal) -> Decimal:
-    """Dynamic PT based on pt_slab_json system setting."""
-    slabs = get_pt_slabs()
-    gross_float = float(gross)
-    for slab in slabs:
-        if gross_float <= slab.get('upto', 0):
-            return ROUND2(slab.get('pt', 0))
-    return ROUND2(slabs[-1].get('pt', 200)) if slabs else ROUND2(200)
+def calculate_pt(gross: Decimal = None) -> Decimal:
+    """
+    PT = flat amount from System Settings (pt_flat_amount key).
+    Enter e.g. 200 in System Settings → deducts ₹200/month (prorated by attendance).
+    Enter 0 → no PT deduction.
+    gross param kept for signature compatibility but not used.
+    """
+    return ROUND2(get_pt_flat_amount())
 
 
 def calculate_tds(effective_gross: Decimal, emp_type: str) -> Decimal:
@@ -309,8 +309,10 @@ def process_payroll_run(payroll_run: PayrollRun):
         # ESI: live % of effective gross, only if gross <= threshold (prorated)
         esi_emp = ROUND2(effective_gross * esi_emp_pct * ratio) if effective_gross <= esi_threshold else Decimal('0')
 
-        # PT: dynamic slabs on effective gross (prorated)
-        pt_full = calculate_pt(effective_gross)
+        # PT: ALWAYS use pt_flat_amount from System Settings.
+        # Changing PT in System Settings → takes effect on the very next payroll run.
+        # Structure's stored pt is ignored — single source of truth is System Settings.
+        pt_full = calculate_pt()   # reads get_pt_flat_amount() live from System Settings
         pt      = ROUND2(pt_full * ratio)
 
         # ── Step 5: TDS ───────────────────────────────────────────────

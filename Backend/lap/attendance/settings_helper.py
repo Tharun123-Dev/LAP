@@ -169,21 +169,23 @@ def get_tds_flat_contract() -> Decimal:
     return Decimal(str(_get('tds_flat_percent_contract', 10)))
 
 
+def get_pt_flat_amount() -> Decimal:
+    """
+    Professional Tax flat monthly amount (₹).
+    Enter a plain number in System Settings e.g. 200 → deducts ₹200/month.
+    Enter 0 → no PT deduction.
+    Default 200.
+    """
+    return Decimal(str(_get('pt_flat_amount', 200)))
+
+
 def get_pt_slabs() -> list:
-    """PT slabs as list of dicts: [{'upto': 20000, 'pt': 150}, ...]"""
-    default = [
-        {'upto': 15000,     'pt': 0},
-        {'upto': 20000,     'pt': 150},
-        {'upto': 99999999,  'pt': 200},
-    ]
-    raw = _get('pt_slab_json', default)
-    if isinstance(raw, list):
-        return sorted(raw, key=lambda x: x.get('upto', 0))
-    try:
-        import json
-        return sorted(json.loads(raw), key=lambda x: x.get('upto', 0))
-    except Exception:
-        return default
+    """
+    Kept for backward compatibility only.
+    PT is now a flat amount via get_pt_flat_amount().
+    """
+    flat = float(get_pt_flat_amount())
+    return [{'upto': 99999999, 'pt': flat}]
 
 
 # ── LEAVE ─────────────────────────────────────────────────────────────────────
@@ -206,6 +208,33 @@ def get_leave_low_threshold() -> int:
 
 def get_sandwich_rule() -> bool:
     return _parse_bool(_get('sandwich_rule_enabled', True))
+
+
+# ── PAYROLL FIXED ALLOWANCE DEFAULTS ─────────────────────────────────────────
+
+def get_default_transport() -> Decimal:
+    """Default transport allowance per month. Default 1600."""
+    return Decimal(str(_get('default_transport_allowance', 1600)))
+
+
+def get_default_medical() -> Decimal:
+    """Default medical allowance per month. Default 1250."""
+    return Decimal(str(_get('default_medical_allowance', 1250)))
+
+
+def get_default_other_allowance() -> Decimal:
+    """Default other allowance per month. Default 0."""
+    return Decimal(str(_get('default_other_allowance', 0)))
+
+
+def get_default_pt() -> Decimal:
+    """Default professional tax per month. Default 200."""
+    return Decimal(str(_get('default_pt_amount', 200)))
+
+
+def get_working_days_per_month() -> int:
+    """Standard working days per month for OT/LOP calculation. Default 22."""
+    return int(_get('working_days_per_month', 22))
 
 
 # ── GENERAL ───────────────────────────────────────────────────────────────────

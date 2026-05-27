@@ -75,7 +75,7 @@ const KEY_IMPACT = {
   hra_percent_nonmetro:      ['💰 HRA in payslip (non-metro)'],
   payroll_lock_day:          ['💰 Payroll Runs warning'],
   tds_flat_percent_contract: ['💰 TDS for contract employees'],
-  pt_slab_json:              ['💰 PT deduction in payslip'],
+  pt_flat_amount:            ['💰 PT deduction in payslip'],
   company_name:              ['🧾 Payslip header', '📧 Email subject'],
   fiscal_year_start_month:   ['💰 Payroll year', '🌴 Fiscal leave year'],
   probation_period_months:   ['🌴 EL eligibility for new employees'],
@@ -217,7 +217,8 @@ const HIDDEN_KEYS = [
    'sl_days_per_year',
    'sl_advance_notice_days',
    'sl_is_paid',
-   ''
+   'pt_slab_json'
+   
 
    
 
