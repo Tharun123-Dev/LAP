@@ -1,7 +1,16 @@
 # attendance/views.py
+# ─────────────────────────────────────────────────────────────────────────────
+# TIMEZONE-AWARE VERSION
+# All datetime.now() calls are replaced with timezone-aware equivalents.
+# Django's TIME_ZONE setting (from settings.py) is respected automatically.
+# Change TIME_ZONE to 'America/New_York' (or any zone) and every timestamp,
+# grace-period check, OT calculation, and shift comparison follows that zone.
+# ─────────────────────────────────────────────────────────────────────────────
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 import calendar as cal_mod
+
+from django.utils import timezone          # ← key import
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -24,6 +33,28 @@ from .settings_helper import (
 )
 
 
+# ── Helper: current local time in the configured TIME_ZONE ───────────────────
+
+def _now_local():
+    """
+    Return a timezone-aware datetime in the site's configured TIME_ZONE.
+    Works correctly regardless of what TIME_ZONE is set to in settings.py.
+    """
+    return timezone.localtime(timezone.now())
+
+
+def _today_local() -> date:
+    """Return today's date in the site's configured TIME_ZONE."""
+    return _now_local().date()
+
+
+def _now_time_local() -> time:
+    """Return the current wall-clock time in the site's configured TIME_ZONE."""
+    return _now_local().time().replace(tzinfo=None)   # naive time for TimeField
+
+
+# ── Attendance status helper ──────────────────────────────────────────────────
+
 def _get_status(check_in, check_out, hours_worked):
     """
     Determine attendance status — reads ALL thresholds live from SystemSetting.
@@ -38,8 +69,10 @@ def _get_status(check_in, check_out, hours_worked):
     grace_minutes  = get_grace_minutes()
     half_day_hours = Decimal(str(get_half_day_hours()))
 
-    grace_cutoff = datetime.combine(date.today(), shift_start) + timedelta(minutes=grace_minutes)
-    ci           = datetime.combine(date.today(), check_in)
+    # Use a fixed reference date; only the time part matters here
+    ref_date       = date(2000, 1, 1)
+    grace_cutoff   = datetime.combine(ref_date, shift_start) + timedelta(minutes=grace_minutes)
+    ci             = datetime.combine(ref_date, check_in)
 
     if hours_worked < half_day_hours:
         return 'half_day'
@@ -47,6 +80,8 @@ def _get_status(check_in, check_out, hours_worked):
         return 'late'
     return 'present'
 
+
+# ── Location validation ───────────────────────────────────────────────────────
 
 def _validate_location(lat, lon):
     """
@@ -57,7 +92,6 @@ def _validate_location(lat, lon):
     """
     office = OfficeLocation.active()
 
-    # If no office location is configured → allow (don't block employees)
     if office is None:
         return True, None, None, None
 
@@ -101,10 +135,6 @@ class OfficeLocationView(APIView):
         return Response(OfficeLocationSerializer(office).data)
 
     def post(self, request):
-        """
-        Creates a new active location and deactivates all previous ones,
-        OR updates existing active one in-place.
-        """
         name          = request.data.get('name', 'Head Office')
         latitude      = request.data.get('latitude')
         longitude     = request.data.get('longitude')
@@ -116,7 +146,6 @@ class OfficeLocationView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Deactivate all existing
         OfficeLocation.objects.filter(is_active=True).update(is_active=False)
 
         office = OfficeLocation.objects.create(
@@ -136,11 +165,10 @@ class CheckInView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def post(self, request):
-        today    = date.today()
+        today    = _today_local()           # ← timezone-aware date
         is_wfh   = request.data.get('is_wfh', False)
-        now_time = datetime.now().time()
+        now_time = _now_time_local()        # ← timezone-aware wall clock
 
-        # ── Location validation (skip for WFH) ───────────────────────────────
         if not is_wfh:
             lat = request.data.get('latitude')
             lon = request.data.get('longitude')
@@ -148,8 +176,8 @@ class CheckInView(APIView):
             if not ok:
                 return Response(
                     {
-                        'error':      error_msg,
-                        'distance_m': distance_m,
+                        'error':          error_msg,
+                        'distance_m':     distance_m,
                         'allowed_radius': office.radius_meters if office else None,
                     },
                     status=status.HTTP_400_BAD_REQUEST
@@ -168,34 +196,34 @@ class CheckInView(APIView):
             )
 
         if existing:
-            existing.check_in            = now_time
-            existing.is_wfh              = is_wfh
-            existing.status              = 'half_day'
-            existing.note                = 'Checked in — awaiting checkout'
-            existing.checkin_latitude    = lat
-            existing.checkin_longitude   = lon
-            existing.checkin_distance_m  = distance_m
+            existing.check_in           = now_time
+            existing.is_wfh             = is_wfh
+            existing.status             = 'half_day'
+            existing.note               = 'Checked in — awaiting checkout'
+            existing.checkin_latitude   = lat
+            existing.checkin_longitude  = lon
+            existing.checkin_distance_m = distance_m
             existing.save()
             record = existing
         else:
             record = AttendanceRecord.objects.create(
-                employee            = request.user,
-                date                = today,
-                check_in            = now_time,
-                is_wfh              = is_wfh,
-                status              = 'half_day',
-                note                = 'Checked in — awaiting checkout',
-                checkin_latitude    = lat,
-                checkin_longitude   = lon,
-                checkin_distance_m  = distance_m,
+                employee           = request.user,
+                date               = today,
+                check_in           = now_time,
+                is_wfh             = is_wfh,
+                status             = 'half_day',
+                note               = 'Checked in — awaiting checkout',
+                checkin_latitude   = lat,
+                checkin_longitude  = lon,
+                checkin_distance_m = distance_m,
             )
 
         return Response({
-            'message':     'Checked in successfully',
-            'check_in':    str(now_time.strftime('%H:%M')),
-            'is_wfh':      is_wfh,
-            'distance_m':  distance_m,
-            'record':      AttendanceRecordSerializer(record).data,
+            'message':    'Checked in successfully',
+            'check_in':   now_time.strftime('%H:%M'),
+            'is_wfh':     is_wfh,
+            'distance_m': distance_m,
+            'record':     AttendanceRecordSerializer(record).data,
         })
 
 
@@ -205,8 +233,8 @@ class CheckOutView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def post(self, request):
-        today    = date.today()
-        now_time = datetime.now().time()
+        today    = _today_local()           # ← timezone-aware date
+        now_time = _now_time_local()        # ← timezone-aware wall clock
 
         record = AttendanceRecord.objects.filter(
             employee=request.user, date=today
@@ -224,7 +252,6 @@ class CheckOutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # ── Location validation (skip for WFH) ───────────────────────────────
         if not record.is_wfh:
             lat = request.data.get('latitude')
             lon = request.data.get('longitude')
@@ -248,20 +275,20 @@ class CheckOutView(APIView):
         diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
         ot   = max(diff - standard_hours, Decimal('0'))
 
-        record.check_out             = now_time
-        record.hours_worked          = diff
-        record.ot_hours              = ot
-        record.status                = _get_status(record.check_in, now_time, diff)
-        record.checkout_latitude     = lat
-        record.checkout_longitude    = lon
-        record.checkout_distance_m   = distance_m
+        record.check_out            = now_time
+        record.hours_worked         = diff
+        record.ot_hours             = ot
+        record.status               = _get_status(record.check_in, now_time, diff)
+        record.checkout_latitude    = lat
+        record.checkout_longitude   = lon
+        record.checkout_distance_m  = distance_m
         if 'awaiting checkout' in (record.note or '').lower():
             record.note = ''
         record.save()
 
         return Response({
             'message':      'Checked out successfully',
-            'check_out':    str(now_time.strftime('%H:%M')),
+            'check_out':    now_time.strftime('%H:%M'),
             'hours_worked': float(diff),
             'ot_hours':     float(ot),
             'status':       record.status,
@@ -276,7 +303,7 @@ class TodayAttendanceView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
-        today  = date.today()
+        today  = _today_local()             # ← timezone-aware date
         record = AttendanceRecord.objects.filter(
             employee=request.user, date=today
         ).first()
@@ -313,8 +340,9 @@ class MyAttendanceView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
-        month = int(request.query_params.get('month', date.today().month))
-        year  = int(request.query_params.get('year',  date.today().year))
+        today = _today_local()              # ← timezone-aware date
+        month = int(request.query_params.get('month', today.month))
+        year  = int(request.query_params.get('year',  today.year))
 
         records = AttendanceRecord.objects.filter(
             employee=request.user,
@@ -346,7 +374,7 @@ class MyAttendanceView(APIView):
         record_map = {str(r.date): r for r in records}
         serialized = list(AttendanceRecordSerializer(records, many=True).data)
 
-        today_str = str(date.today())
+        today_str = str(today)
 
         for rec in serialized:
             if rec.get('check_in') and not rec.get('check_out') and rec.get('date') != today_str:
@@ -398,7 +426,7 @@ class MyAttendanceView(APIView):
         shift_start   = get_shift_start()
         grace_minutes = get_grace_minutes()
         late_cutoff   = (
-            datetime.combine(date.today(), shift_start) +
+            datetime.combine(today, shift_start) +
             timedelta(minutes=grace_minutes)
         ).strftime('%H:%M')
 
@@ -422,8 +450,9 @@ class AllAttendanceView(APIView):
     permission_classes = [make_permission('view_team_attendance')]
 
     def get(self, request):
-        month  = int(request.query_params.get('month', date.today().month))
-        year   = int(request.query_params.get('year',  date.today().year))
+        today  = _today_local()
+        month  = int(request.query_params.get('month', today.month))
+        year   = int(request.query_params.get('year',  today.year))
         emp_id = request.query_params.get('employee')
 
         records = AttendanceRecord.objects.select_related(
@@ -579,9 +608,10 @@ class ApproveRegularizationView(APIView):
 
             if record.check_in and record.check_out:
                 standard_hours = Decimal(str(get_standard_hours()))
-                ci   = datetime.combine(date.today(), record.check_in)
-                co   = datetime.combine(date.today(), record.check_out)
-                diff = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
+                ref            = date(2000, 1, 1)
+                ci             = datetime.combine(ref, record.check_in)
+                co             = datetime.combine(ref, record.check_out)
+                diff           = Decimal(str(round((co - ci).total_seconds() / 3600, 2)))
                 record.hours_worked = diff
                 record.ot_hours     = max(diff - standard_hours, Decimal('0'))
                 record.status       = _get_status(record.check_in, record.check_out, diff)
