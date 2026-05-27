@@ -93,11 +93,7 @@ SETTINGS = [
         label='Casual Leave — Monthly Cap',
         description='Max CL per month. 0 = no cap.',
     ),
-    dict(
-        key='cl_advance_notice_days', value='2', value_type='integer', category='leave',
-        label='CL Advance Notice (Days)',
-        description='Minimum working days notice required for Casual Leave.',
-    ),
+
     dict(
         key='sl_advance_notice_days', value='0', value_type='integer', category='leave',
         label='SL Advance Notice (Days)',

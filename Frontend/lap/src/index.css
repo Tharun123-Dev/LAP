@@ -1,44 +1,74 @@
-/* index.css — FULL REPLACEMENT
-   Fixes: removes root width cap, centers, border that breaks full-width layout */
-
-*, *::before, *::after {
-  box-sizing: border-box;
-}
-
-:root {
-  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  color: #111;
-  background: #f9fafb;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-html, body {
-  margin: 0;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  overflow: hidden; /* shell manages scrolling */
-}
-
-#root {
+/* ── Layout shell ── */
+.layout-shell {
+  display: flex;
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  display: flex;
-  text-align: left;
 }
 
-p { margin: 0; }
+/* Sidebar — fixed width, never overlaps */
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  flex-shrink: 0;
+  height: 100vh;
+  overflow-y: auto;
+  position: relative; /* NOT fixed/absolute */
+  background: #1a1a2e;
+  z-index: 10;
+}
 
-button { font-family: inherit; }
+/* Sidebar collapsed */
+.sidebar.collapsed {
+  width: 64px;
+  min-width: 64px;
+}
 
-input, textarea, select { font-family: inherit; }
+/* Main content — takes remaining space, scrolls independently */
+.main-content {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #f9fafb;
+}
 
-/* Scrollbar styling */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+/* Page content padding */
+.page-content {
+  padding: 24px;
+}
+
+/* Mobile overlay sidebar */
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    width: 220px;
+    min-width: 220px;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 99;
+  }
+
+  .sidebar.open ~ .sidebar-overlay {
+    display: block;
+  }
+
+  .main-content {
+    width: 100%;
+  }
+}

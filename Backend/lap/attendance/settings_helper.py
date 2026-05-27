@@ -104,13 +104,18 @@ def is_weekend(date_obj) -> bool:
 def get_working_days_in_month(year: int, month: int) -> tuple:
     import calendar
     from datetime import date
+    from attendance.models import Holiday
     _, days_in_month = calendar.monthrange(year, month)
+    holiday_dates = set(
+        Holiday.objects.filter(date__year=year, date__month=month)
+        .values_list('date', flat=True)
+    )
     working = sum(
         1 for d in range(1, days_in_month + 1)
         if not is_weekend(date(year, month, d))
+        and date(year, month, d) not in holiday_dates
     )
     return working, days_in_month
-
 
 # ── PAYROLL — ALL 11 SETTINGS ─────────────────────────────────────────────────
 
@@ -255,8 +260,6 @@ def get_probation_months() -> int:
     return int(_get('probation_period_months', 6))
 
 
-def get_cl_advance_notice_days() -> int:
-    return int(_get('cl_advance_notice_days', 0))
 
 
 def get_sl_advance_notice_days() -> int:
@@ -269,8 +272,7 @@ def get_el_advance_notice_days() -> int:
 
 def get_leave_advance_notice_days(leave_code: str) -> int:
     code = (leave_code or '').upper()
-    if code == 'CL':
-        return get_cl_advance_notice_days()
+    
     if code == 'SL':
         return get_sl_advance_notice_days()
     if code == 'EL':

@@ -131,7 +131,12 @@ def get_attendance_summary(employee, year, month):
     )
 
     record_map = {r.date: r for r in records}
-
+    from attendance.models import Holiday
+    
+    holiday_dates = set(
+        Holiday.objects.filter(date__year=year, date__month=month)
+        .values_list('date', flat=True)
+    )
     paid_full_dates, paid_half_dates, lop_dates = (
         get_approved_leave_dates(employee, year, month)
     )
@@ -188,7 +193,10 @@ def get_attendance_summary(employee, year, month):
                 ot_hrs += Decimal(str(rec.ot_hours))
 
         else:
-            if d in paid_full_dates or d in paid_half_dates:
+            # Holiday = paid day off — treat as present even with no attendance record
+            if d in holiday_dates:
+                present += Decimal('1')
+            elif d in paid_full_dates or d in paid_half_dates:
                 present += Decimal('1')
             elif d in lop_dates:
                 lop += Decimal('1')

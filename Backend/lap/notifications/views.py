@@ -94,7 +94,7 @@ DEFAULT_SETTINGS = [
     {'key': 'late_marks_per_half_day',  'label': 'Late Marks per Half-Day LOP',  'value': '3',          'value_type': 'integer',  'category': 'attendance', 'description': 'Number of late marks that trigger 0.5 LOP deduction'},
     {'key': 'weekend_days',             'label': 'Weekend Days',                  'value': '["saturday","sunday"]', 'value_type': 'json', 'category': 'general', 'description': 'JSON list of weekend day names'},
     # Leave
-    {'key': 'cl_advance_notice_days',   'label': 'CL Advance Notice (Days)',     'value': '2',          'value_type': 'integer',  'category': 'leave',      'description': 'Min advance notice days for Casual Leave'},
+  
     {'key': 'sl_doc_required_after_days','label': 'SL Certificate After (Days)', 'value': '2',          'value_type': 'integer',  'category': 'leave',      'description': 'Medical cert required after N sick days'},
     {'key': 'sandwich_rule_enabled',    'label': 'Sandwich Rule Enabled',        'value': 'true',       'value_type': 'boolean',  'category': 'leave',      'description': 'Count sandwiched weekends as leave'},
     {'key': 'el_max_carry_forward',     'label': 'Max EL Carry Forward (Days)',  'value': '45',         'value_type': 'integer',  'category': 'leave',      'description': 'Max Earned Leave days that carry forward'},
