@@ -66,9 +66,26 @@ def init_balances_for_employee(employee, year: int = None) -> int:
     """
     Create LeaveBalance rows for all applicable leave types for this employee/year.
     Called on first login of a new year and when a new employee is created.
+    Respects probation_period_months — EL total is set to 0 during probation.
     """
     if year is None:
         year = date.today().year
+
+    # ── Probation check ──────────────────────────────────────────────────────
+    on_probation = False
+    try:
+        from notifications.models import SystemSetting
+        from dateutil.relativedelta import relativedelta
+        prob_months  = int(SystemSetting.objects.get(key='probation_period_months').value)
+        joining_date = getattr(employee, 'date_joined', None)
+        if joining_date:
+            if hasattr(joining_date, 'date'):
+                joining_date = joining_date.date()
+            probation_end = joining_date + relativedelta(months=prob_months)
+            on_probation  = date.today() < probation_end
+    except Exception:
+        on_probation = False
+    # ─────────────────────────────────────────────────────────────────────────
 
     emp_type = getattr(employee, 'employee_type', 'regular')
     types = LeaveType.objects.filter(
@@ -77,11 +94,14 @@ def init_balances_for_employee(employee, year: int = None) -> int:
 
     created_count = 0
     for lt in types:
+        is_el     = lt.code.upper() in ('EL', 'PL') or 'earned' in lt.name.lower()
+        allocated = 0 if (on_probation and is_el) else lt.days_allowed
+
         _, created = LeaveBalance.objects.get_or_create(
             employee=employee,
             leave_type=lt,
             year=year,
-            defaults={'total': lt.days_allowed},
+            defaults={'total': allocated},
         )
         if created:
             created_count += 1

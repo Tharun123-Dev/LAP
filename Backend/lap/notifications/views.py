@@ -103,7 +103,8 @@ DEFAULT_SETTINGS = [
     {'key': 'overtime_multiplier',      'label': 'Overtime Multiplier',          'value': '1.5',        'value_type': 'decimal',  'category': 'payroll',    'description': 'OT pay multiplier (1.5 = 1.5x hourly rate)'},
     {'key': 'esi_threshold_salary',     'label': 'ESI Wage Threshold (₹)',       'value': '21000',      'value_type': 'integer',  'category': 'payroll',    'description': 'Gross below this = ESI applicable'},
     # General
-    {'key': 'company_name',             'label': 'Company Name',                 'value': 'My Company', 'value_type': 'string',   'category': 'general',    'description': 'Company name on payslips and emails'},
+   {'key': 'currency',          'label': 'Currency',          'value': 'INR',  'value_type': 'string', 'category': 'general', 'description': 'Currency symbol used in payroll and reports.'},
+{'key': 'company_logo_url',  'label': 'Company Logo URL',  'value': '',     'value_type': 'string', 'category': 'general', 'description': 'Logo URL shown in payslip and email headers.'},
     {'key': 'timezone',                 'label': 'Timezone',                     'value': 'Asia/Kolkata','value_type': 'string',  'category': 'general',    'description': 'System timezone'},
     {'key': 'fiscal_year_start_month',  'label': 'Fiscal Year Start Month',      'value': '4',          'value_type': 'integer',  'category': 'general',    'description': 'Month fiscal year starts (4=April)'},
 ]

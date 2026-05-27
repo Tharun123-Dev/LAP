@@ -217,8 +217,9 @@ const HIDDEN_KEYS = [
    'sl_days_per_year',
    'sl_advance_notice_days',
    'sl_is_paid',
-   'pt_slab_json'
-   
+   'pt_slab_json',
+   'currency',
+   'fiscal_year_start_month',
 
    
 
