@@ -156,6 +156,19 @@ def get_attendance_summary(employee, year, month):
 
         rec = record_map.get(d)
 
+        # ── PUBLIC HOLIDAY — checked FIRST, before any record or auto-absent logic ──
+        # A holiday is always a full paid present day for ALL employees.
+        # This applies even if:
+        #   - the employee has no attendance record at all that month
+        #   - the employee has a half_day / absent record on that date
+        #   - auto_absent_enabled is True
+        # OT is still counted if the employee chose to work on the holiday.
+        if d in holiday_dates:
+            present += Decimal('1')
+            if rec and rec.ot_hours:
+                ot_hrs += Decimal(str(rec.ot_hours))
+            continue   # skip ALL record / auto-absent processing for this date
+
         if rec:
             status = str(rec.status).lower()
 
@@ -193,10 +206,8 @@ def get_attendance_summary(employee, year, month):
                 ot_hrs += Decimal(str(rec.ot_hours))
 
         else:
-            # Holiday = paid day off — treat as present even with no attendance record
-            if d in holiday_dates:
-                present += Decimal('1')
-            elif d in paid_full_dates or d in paid_half_dates:
+            # No attendance record, not a holiday, not a weekend
+            if d in paid_full_dates or d in paid_half_dates:
                 present += Decimal('1')
             elif d in lop_dates:
                 lop += Decimal('1')
@@ -206,12 +217,22 @@ def get_attendance_summary(employee, year, month):
 
     late_lop = calculate_late_lop(late_count)
 
+    # Count holidays this month for display in payslip attendance section
+    from attendance.models import Holiday as _Holiday
+    holiday_count = _Holiday.objects.filter(date__year=year, date__month=month).count()
+    holiday_names = list(
+        _Holiday.objects.filter(date__year=year, date__month=month)
+        .values_list('name', flat=True)
+    )
+
     return {
-        'present':    present,
-        'lop_days':   lop,
-        'late_lop':   late_lop,
-        'late_count': late_count,
-        'ot_hours':   ot_hrs,
+        'present':       present,
+        'lop_days':      lop,
+        'late_lop':      late_lop,
+        'late_count':    late_count,
+        'ot_hours':      ot_hrs,
+        'holiday_count': holiday_count,
+        'holiday_names': holiday_names,
     }
 
 
@@ -260,13 +281,15 @@ def process_payroll_run(payroll_run: PayrollRun):
             continue
 
         # ── Attendance ────────────────────────────────────────────────
-        att        = get_attendance_summary(emp, year, month)
-        present    = att['present']
-        lop_days   = att['lop_days']
-        late_lop   = att['late_lop']
-        late_count = att['late_count']
-        ot_hours   = att['ot_hours']
-        total_lop  = lop_days + late_lop
+        att           = get_attendance_summary(emp, year, month)
+        present       = att['present']
+        lop_days      = att['lop_days']
+        late_lop      = att['late_lop']
+        late_count    = att['late_count']
+        ot_hours      = att['ot_hours']
+        holiday_count = att.get('holiday_count', 0)
+        holiday_names = att.get('holiday_names', [])
+        total_lop     = lop_days + late_lop
 
         effective_present = max(
             min(Decimal(str(working_days)) - total_lop, Decimal(str(working_days))),
@@ -339,6 +362,8 @@ def process_payroll_run(payroll_run: PayrollRun):
             present_days      = effective_present,
             lop_days          = total_lop,
             ot_hours          = ot_hours,
+            holiday_count     = holiday_count,
+            holiday_names     = holiday_names,
             basic             = basic,
             hra               = hra,
             da                = da,

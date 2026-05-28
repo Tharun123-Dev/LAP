@@ -237,6 +237,9 @@ class PayrollEntry(models.Model):
     present_days   = models.DecimalField(max_digits=5, decimal_places=1, default=0)
     lop_days       = models.DecimalField(max_digits=5, decimal_places=1, default=0)
     ot_hours       = models.DecimalField(max_digits=6, decimal_places=2, default=0)
+    # Public holidays this month — stored so payslip can display them
+    holiday_count  = models.IntegerField(default=0)
+    holiday_names  = models.JSONField(default=list, blank=True)  # e.g. ["Diwali", "Dussehra"]
 
     # Earnings (pro-rated)
     basic          = models.DecimalField(max_digits=10, decimal_places=2, default=0)

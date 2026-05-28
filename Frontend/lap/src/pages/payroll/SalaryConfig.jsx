@@ -338,23 +338,23 @@ export default function SalaryConfig() {
                   </div>
                   <Grid3>
                     <F label="Basic % of monthly CTC">
-                      <input type="number" value={form.basic_percent} onChange={set('basic_percent')} style={inp} step="0.5" />
+                      <input type="number" value={form.basic_percent} onChange={set('basic_percent')} style={inp} step="0.5"/>
                       <p style={hint}>System default: {sysDefaults.basic_percent}%</p>
                     </F>
                     <F label="HRA % of Basic">
-                      <input type="number" value={form.hra_percent} onChange={set('hra_percent')} style={inp} step="0.5" />
+                      <input type="number" value={form.hra_percent} onChange={set('hra_percent')} style={inp} step="0.5"  />
                       <p style={hint}>Metro: {sysDefaults.hra_metro}% / Non-metro: {sysDefaults.hra_nonmetro}%</p>
                     </F>
                     <F label="DA % of Basic">
-                      <input type="number" value={form.da_percent} onChange={set('da_percent')} style={inp} step="0.5" />
+                      <input type="number" value={form.da_percent} onChange={set('da_percent')} style={inp} step="0.5"  />
                       <p style={hint}>System default: {sysDefaults.da_percent}%</p>
                     </F>
                     <F label="PF Employee % of Basic">
-                      <input type="number" value={form.pf_percent} onChange={set('pf_percent')} style={inp} step="0.01" />
+                      <input type="number" value={form.pf_percent} onChange={set('pf_percent')} style={inp} step="0.01"  disabled/>
                       <p style={hint}>System default: {sysDefaults.pf_percent}%</p>
                     </F>
                     <F label="ESI Employee % of Gross">
-                      <input type="number" value={form.esi_percent} onChange={set('esi_percent')} style={inp} step="0.01" />
+                      <input type="number" value={form.esi_percent} onChange={set('esi_percent')} style={inp} step="0.01" disabled/>
                       <p style={hint}>System default: {sysDefaults.esi_percent}% · applies if gross ≤ ₹{n(sysDefaults.esi_threshold ?? 21000).toLocaleString('en-IN')}/mo</p>
                     </F>
                   </Grid3>
@@ -363,20 +363,20 @@ export default function SalaryConfig() {
                 <Sect title="Fixed Monthly Allowances">
                   <Grid3>
                     <F label="Transport (₹/mo)">
-                      <input type="number" value={form.transport} onChange={set('transport')} style={inp} />
+                      <input type="number" value={form.transport} onChange={set('transport')} style={inp}  />
                     </F>
                     <F label="Medical (₹/mo)">
                       <input type="number" value={form.medical} onChange={set('medical')} style={inp} />
                     </F>
                     <F label="Other Allowance (₹/mo)">
-                      <input type="number" value={form.other_allowance} onChange={set('other_allowance')} style={inp} />
+                      <input type="number" value={form.other_allowance} onChange={set('other_allowance')} style={inp}  />
                     </F>
                   </Grid3>
                 </Sect>
 
                 <Sect title="Professional Tax">
                   <F label="PT (₹/mo) — leave 0 to auto-use System Settings value">
-                    <input type="number" value={form.pt} onChange={set('pt')} style={inp} />
+                    <input type="number" value={form.pt} onChange={set('pt')} style={inp} disabled />
                   </F>
                 </Sect>
 

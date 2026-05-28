@@ -160,6 +160,7 @@ export default function PayslipModal({ entry, onClose }) {
               { l: 'Emp Code',     v: entry.emp_code      || '—' },
               { l: 'Department',   v: entry.department    || '—' },
               { l: 'Working Days', v: `${entry.working_days} days` },
+              { l: 'Holidays',     v: entry.holiday_count > 0 ? `${entry.holiday_count} day(s)` : '—', accent: entry.holiday_count > 0 ? '#1e40af' : null },
               { l: 'Days Present', v: `${fmtD(entry.present_days)} days` },
               { l: 'LOP Days',     v: `${fmtD(entry.lop_days)} days`, accent: hasLOP ? '#dc2626' : null },
               { l: 'OT Hours',     v: hasOT ? `${fmtD(entry.ot_hours)} hrs` : '—', accent: hasOT ? '#7c3aed' : null },
@@ -199,6 +200,23 @@ export default function PayslipModal({ entry, onClose }) {
               Rate: <strong>{fmt(lopPerDay)}/day</strong> (Gross ÷ {entry.working_days} working days).
               Total LOP deduction: <strong>{fmt(entry.lop_deduction)}</strong>
             </p>
+          </div>
+        )}
+
+        {/* ── Holiday info ── */}
+        {entry.holiday_count > 0 && (
+          <div style={{ padding: '11px 30px', background: '#eff6ff', borderBottom: '2px solid #bfdbfe', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+            <span style={{ fontSize: '18px', flexShrink: 0 }}>🗓</span>
+            <div>
+              <p style={{ margin: 0, fontSize: '13px', color: '#1e40af', fontWeight: 600 }}>
+                {entry.holiday_count} Public Holiday{entry.holiday_count > 1 ? 's' : ''} this month — counted as present (no LOP)
+              </p>
+              {entry.holiday_names?.length > 0 && (
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#3b82f6' }}>
+                  {entry.holiday_names.join(' · ')}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -274,6 +292,12 @@ export default function PayslipModal({ entry, onClose }) {
         {/* ── Net Pay Formula ── */}
         <div style={{ padding: '11px 30px', background: '#f8fafc', borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb' }}>
           <p style={{ margin: 0, fontSize: '12px', color: '#888', textAlign: 'center', lineHeight: 1.8 }}>
+            {entry.holiday_count > 0 && (
+              <span style={{ display: 'block', color: '#1e40af', fontSize: '11px', marginBottom: '4px' }}>
+                🗓 {entry.holiday_count} holiday{entry.holiday_count > 1 ? 's' : ''} counted as present
+                {entry.holiday_names?.length > 0 ? ` (${entry.holiday_names.join(', ')})` : ''}
+              </span>
+            )}
             <strong>Net Pay</strong> = Gross {fmt(entry.gross)}
             {hasLOP && <span style={{ color: '#ea580c' }}> − LOP {fmt(entry.lop_deduction)}</span>}
             {n(entry.pf_employee)  > 0 && <span> − PF {fmt(entry.pf_employee)}</span>}

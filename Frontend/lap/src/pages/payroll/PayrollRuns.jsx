@@ -431,6 +431,7 @@ export default function PayrollRuns() {
                           {parseFloat(e.present_days).toFixed(1)}
                           <span style={{ color:'#aaa', fontWeight:400 }}>/{e.working_days}</span>
                         </div>
+                        {(e.holiday_count > 0) && <div style={{ fontSize:'10px', color:'#1e40af', fontWeight:600, whiteSpace:'nowrap' }}>🗓 {e.holiday_count} holiday{e.holiday_count>1?'s':''}</div>}
                         {hasLOP && <div style={{ fontSize:'10px', color:'#ea580c', fontWeight:600, whiteSpace:'nowrap' }}>⚡ {parseFloat(e.lop_days).toFixed(1)} LOP</div>}
                       </td>
                       <td style={TD}>
