@@ -281,10 +281,33 @@ class MyAttendanceView(APIView):
 
         today_str = str(today)
 
-        # Mark unchecked-out past records as half_day
+        # Missing checkout is not final until corrected/approved.
         for rec in serialized:
             if rec.get('check_in') and not rec.get('check_out') and rec.get('date') != today_str:
-                rec['status'] = 'half_day'
+                rec['status'] = 'pending'
+                rec['pending_reason'] = 'missing_checkout'
+
+        from attendance.settings_helper import is_weekend as _is_weekend
+        month_end = date(year, month, cal_mod.monthrange(year, month)[1])
+        visible_until = min(today - timedelta(days=1), month_end)
+        cur = date(year, month, 1)
+        while cur <= visible_until:
+            cur_str = str(cur)
+            if (
+                not _is_weekend(cur)
+                and cur_str not in existing_dates
+                and cur_str not in holiday_date_set
+                and cur_str not in leave_dates
+            ):
+                serialized.append({
+                    'id': None, 'date': cur_str,
+                    'check_in': None, 'check_out': None,
+                    'hours_worked': 0, 'ot_hours': 0,
+                    'status': 'pending', 'is_wfh': False,
+                    'leave_name': None, 'is_lop': False,
+                    'pending_reason': 'missing_attendance',
+                })
+            cur += timedelta(days=1)
 
         # ── Inject holiday virtual records ────────────────────────────────────
         # If there is no attendance record on a holiday → create a virtual entry
@@ -340,6 +363,7 @@ class MyAttendanceView(APIView):
             # present + late + holiday all count as "present" for display
             'present':   status_counts.get('present', 0) + status_counts.get('late', 0) + status_counts.get('holiday', 0),
             'absent':    status_counts.get('absent', 0),
+            'pending':   status_counts.get('pending', 0),
             'late':      status_counts.get('late', 0),
             'half_day':  status_counts.get('half_day', 0),
             'leave':     status_counts.get('leave', 0),
@@ -415,12 +439,22 @@ class ApplyRegularizationView(APIView):
             record, _ = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
                 date=parsed_date,
-                defaults={'status': 'absent'},
+                defaults={'status': 'pending', 'note': 'Pending regularization request'},
             )
         else:
             return Response({'error': 'attendance_id or date is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if hasattr(record, 'regularization'):
+            reg = record.regularization
+            if reg.status == 'rejected':
+                reg.status = 'pending'
+                reg.reason = reason
+                reg.requested_checkin = requested_checkin
+                reg.requested_checkout = requested_checkout
+                reg.approved_by = None
+                reg.approver_note = ''
+                reg.save()
+                return Response(RegularizationSerializer(reg).data, status=status.HTTP_200_OK)
             return Response({'error': 'Regularisation already submitted for this date'}, status=status.HTTP_400_BAD_REQUEST)
 
         reg = AttendanceRegularization.objects.create(
@@ -444,13 +478,13 @@ class MyRegularizationsView(APIView):
 # ── ALL REGULARISATIONS ───────────────────────────────────────────────────────
 
 class AllRegularizationsView(APIView):
-    permission_classes = [make_permission('approve_regularization')]
+    permission_classes = [make_permission('approve_regularize')]
 
     def get(self, request):
         status_filter = request.query_params.get('status')
         qs = AttendanceRegularization.objects.select_related(
             'employee', 'employee__profile', 'attendance',
-        ).order_by('-created_at')
+        ).exclude(employee=request.user).order_by('-created_at')
         if status_filter:
             qs = qs.filter(status=status_filter)
         return Response(RegularizationSerializer(qs, many=True).data)
@@ -459,7 +493,7 @@ class AllRegularizationsView(APIView):
 # ── APPROVE / REJECT REGULARISATION ──────────────────────────────────────────
 
 class ApproveRegularizationView(APIView):
-    permission_classes = [make_permission('approve_regularization')]
+    permission_classes = [make_permission('approve_regularize')]
 
     def post(self, request, pk):
         reg    = get_object_or_404(AttendanceRegularization, pk=pk)

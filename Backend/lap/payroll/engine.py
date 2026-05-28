@@ -35,6 +35,7 @@ from .models import SalaryStructure, PayrollRun, PayrollEntry
 
 
 ROUND2 = lambda v: Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+COMP_OFF_CODES = {'COMP_OFF', 'COMP', 'CO', 'COMPENSATORY'}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -121,6 +122,23 @@ def calculate_ot_pay(basic: Decimal, working_days: int, ot_hours: Decimal) -> De
     return ROUND2(hourly_rate * multiplier * ot_hours)
 
 
+def count_comp_off_leave_days(employee, year, month):
+    start_of_month = date(year, month, 1)
+    end_of_month = date(year, month, calendar.monthrange(year, month)[1])
+    approved = LeaveRequest.objects.filter(
+        employee=employee,
+        status='approved',
+        start_date__lte=end_of_month,
+        end_date__gte=start_of_month,
+        leave_type__code__in=COMP_OFF_CODES,
+    ).select_related('leave_type')
+
+    total = Decimal('0')
+    for lr in approved:
+        total += Decimal(str(lr.days))
+    return total
+
+
 def get_attendance_summary(employee, year, month):
     _, days_in_month = calendar.monthrange(year, month)
 
@@ -140,11 +158,13 @@ def get_attendance_summary(employee, year, month):
     paid_full_dates, paid_half_dates, lop_dates = (
         get_approved_leave_dates(employee, year, month)
     )
+    comp_off_days = count_comp_off_leave_days(employee, year, month)
 
     present    = Decimal('0')
     lop        = Decimal('0')
     ot_hrs     = Decimal('0')
     late_count = 0
+    extra_work_dates = []
 
     auto_absent_enabled = get_auto_absent_enabled()
 
@@ -152,6 +172,16 @@ def get_attendance_summary(employee, year, month):
         d = date(year, month, day)
 
         if is_weekend(d):
+            rec = record_map.get(d)
+            if rec and rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day'):
+                extra_work_dates.append({
+                    'date': str(d),
+                    'type': 'weekend',
+                    'check_in': str(rec.check_in),
+                    'check_out': str(rec.check_out),
+                })
+                if rec.ot_hours:
+                    ot_hrs += Decimal(str(rec.ot_hours))
             continue
 
         rec = record_map.get(d)
@@ -165,8 +195,15 @@ def get_attendance_summary(employee, year, month):
         # OT is still counted if the employee chose to work on the holiday.
         if d in holiday_dates:
             present += Decimal('1')
-            if rec and rec.ot_hours:
-                ot_hrs += Decimal(str(rec.ot_hours))
+            if rec and rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day', 'holiday'):
+                extra_work_dates.append({
+                    'date': str(d),
+                    'type': 'holiday',
+                    'check_in': str(rec.check_in),
+                    'check_out': str(rec.check_out),
+                })
+                if rec.ot_hours:
+                    ot_hrs += Decimal(str(rec.ot_hours))
             continue   # skip ALL record / auto-absent processing for this date
 
         if rec:
@@ -186,7 +223,7 @@ def get_attendance_summary(employee, year, month):
                     present += Decimal('0.5')
                     lop += Decimal('0.5')
 
-            elif status in ['absent', 'auto_absent', 'lop']:
+            elif status in ['absent', 'auto_absent', 'lop', 'pending']:
                 if d in paid_full_dates or d in paid_half_dates:
                     present += Decimal('1')
                 else:
@@ -217,6 +254,12 @@ def get_attendance_summary(employee, year, month):
 
     late_lop = calculate_late_lop(late_count)
 
+    raw_extra_days = Decimal(str(len(extra_work_dates)))
+    paid_extra_days = max(raw_extra_days - comp_off_days, Decimal('0'))
+    paid_extra_date_count = int(paid_extra_days)
+    for idx, item in enumerate(extra_work_dates):
+        item['payable'] = idx < paid_extra_date_count
+
     # Count holidays this month for display in payslip attendance section
     from attendance.models import Holiday as _Holiday
     holiday_count = _Holiday.objects.filter(date__year=year, date__month=month).count()
@@ -233,6 +276,9 @@ def get_attendance_summary(employee, year, month):
         'ot_hours':      ot_hrs,
         'holiday_count': holiday_count,
         'holiday_names': holiday_names,
+        'extra_work_days': paid_extra_days,
+        'extra_work_dates': extra_work_dates,
+        'comp_off_days': comp_off_days,
     }
 
 
@@ -289,6 +335,9 @@ def process_payroll_run(payroll_run: PayrollRun):
         ot_hours      = att['ot_hours']
         holiday_count = att.get('holiday_count', 0)
         holiday_names = att.get('holiday_names', [])
+        extra_work_days = Decimal(str(att.get('extra_work_days', 0)))
+        extra_work_dates = att.get('extra_work_dates', [])
+        comp_off_days = Decimal(str(att.get('comp_off_days', 0)))
         total_lop     = lop_days + late_lop
 
         effective_present = max(
@@ -318,7 +367,9 @@ def process_payroll_run(payroll_run: PayrollRun):
 
         # ── Step 2: OT pay ────────────────────────────────────────────
         ot_pay = calculate_ot_pay(basic, working_days, ot_hours)
-        gross  = basic + hra + da + special + transport + medical + other + ot_pay
+        base_gross = basic + hra + da + special + transport + medical + other
+        extra_work_pay = ROUND2((base_gross / Decimal(str(working_days))) * extra_work_days) if working_days > 0 else Decimal('0')
+        gross  = base_gross + ot_pay + extra_work_pay
 
         # ── Step 3: LOP deduction ─────────────────────────────────────
         structure_gross = gross - ot_pay  # exclude OT from LOP base
@@ -364,6 +415,10 @@ def process_payroll_run(payroll_run: PayrollRun):
             ot_hours          = ot_hours,
             holiday_count     = holiday_count,
             holiday_names     = holiday_names,
+            extra_work_days   = extra_work_days,
+            extra_work_pay    = extra_work_pay,
+            extra_work_dates  = extra_work_dates,
+            comp_off_days     = comp_off_days,
             basic             = basic,
             hra               = hra,
             da                = da,

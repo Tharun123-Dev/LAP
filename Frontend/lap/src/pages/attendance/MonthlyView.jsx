@@ -18,6 +18,7 @@ const STATUS_COLOR = {
   late:      { bg: '#fef9c3', color: '#854d0e', label: 'L',   title: 'Late' },
   half_day:  { bg: '#fef3c7', color: '#92400e', label: 'H',   title: 'Half Day' },
   absent:    { bg: '#fee2e2', color: '#991b1b', label: 'A',   title: 'Absent / LOP' },
+  pending:   { bg: '#fef9c3', color: '#854d0e', label: 'PEN', title: 'Pending Correction' },
   leave:     { bg: '#ede9fe', color: '#5b21b6', label: 'LV',  title: 'On Leave' },
   lop_leave: { bg: '#fff1f2', color: '#be123c', label: 'LOP', title: 'LOP Leave' },
   holiday:   { bg: '#dbeafe', color: '#1e40af', label: 'PH',  title: 'Public Holiday' },
@@ -130,6 +131,7 @@ export default function MonthlyView() {
     { label: 'Present',    val: data.summary.present,                                  color: '#16a34a' },
     { label: 'Holidays',   val: data.summary.holiday  || 0,                            color: '#1e40af' },
     { label: 'Absent/LOP', val: data.summary.absent,                                   color: '#dc2626' },
+    { label: 'Pending',    val: data.summary.pending || 0,                              color: '#d97706' },
     { label: 'On Leave',   val: data.summary.leave     || 0,                           color: '#7c3aed' },
     { label: 'LOP Leave',  val: data.summary.lop_leave || 0,                           color: '#be123c' },
     { label: 'Late',       val: data.summary.late,                                     color: '#d97706' },
@@ -239,7 +241,7 @@ export default function MonthlyView() {
                 !isWkndDay &&
                 !holidayName &&
                 !isFuture &&
-                effectiveStatus === 'absent' &&
+                (effectiveStatus === 'pending' || effectiveStatus === 'absent') &&
                 !record.leave_name
               )
 
@@ -316,7 +318,7 @@ export default function MonthlyView() {
                     <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#ea580c', fontWeight: 600 }}>no checkout</p>
                   )}
                   {canRegularize && (
-                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>tap to fix</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>tap to request</p>
                   )}
                 </div>
               )
@@ -344,6 +346,7 @@ export default function MonthlyView() {
       {selRecord && (
         <RegularizeModal
           record={selRecord}
+          date={selRecord?.date}
           onClose={() => setSelRecord(null)}
           onSaved={() => { setSelRecord(null); load() }}
         />

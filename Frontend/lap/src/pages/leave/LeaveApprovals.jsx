@@ -71,6 +71,24 @@ function PriorUsageModal({ data, note, onNoteChange, onConfirm, onCancel, loadin
           })()}
 
           {/* Prior leaves table */}
+          {data.is_compensatory && data.comp_off && (
+            <div style={{ marginBottom: '16px', padding: '10px 12px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+              <p style={{ margin: '0 0 6px', fontSize: '12px', fontWeight: 700, color: '#1e40af' }}>
+                Extra worked days available: {data.comp_off.available_days}
+              </p>
+              <p style={{ margin: '0 0 8px', fontSize: '11px', color: '#3b82f6' }}>
+                Worked on weekend/holiday: {data.comp_off.worked_days} day(s) · Used/Pending comp-off: {data.comp_off.used_or_pending_days} day(s)
+              </p>
+              {(data.comp_off.worked_dates || []).slice(0, 6).map(d => (
+                <div key={d.date} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#1e3a8a', padding: '3px 0' }}>
+                  <span>{d.date} · {d.type}</span>
+                  <span>{d.check_in} → {d.check_out}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Prior leaves table */}
           {hasPrior ? (
             <div style={{ marginBottom: '16px' }}>
               <p style={{ margin: '0 0 8px', fontSize: '12px', fontWeight: 600, color: '#b45309' }}>

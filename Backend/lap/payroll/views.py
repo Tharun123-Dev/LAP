@@ -541,6 +541,9 @@ class PayrollRegisterView(APIView):
                 'total_deductions': float(e.total_deductions),
                 'lop_days':         float(e.lop_days),
                 'present_days':     float(e.present_days),
+                'extra_work_days':  float(e.extra_work_days),
+                'extra_work_pay':   float(e.extra_work_pay),
+                'comp_off_days':    float(e.comp_off_days),
             })
 
         summary = {
@@ -550,6 +553,7 @@ class PayrollRegisterView(APIView):
             'total_esi':      float(sum(e.esi_employee for e in entries)),
             'total_tds':      float(sum(e.tds for e in entries)),
             'total_lop':      float(sum(e.lop_deduction for e in entries)),
+            'total_extra_work_pay': float(sum(e.extra_work_pay for e in entries)),
             'employee_count': entries.count(),
         }
 

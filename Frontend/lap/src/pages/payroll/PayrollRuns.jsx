@@ -217,6 +217,7 @@ export default function PayrollRuns() {
     tds:    detail.entries.reduce((s,e) => s+n(e.tds), 0),
     lop:    detail.entries.reduce((s,e) => s+n(e.lop_deduction), 0),
     ot_pay: detail.entries.reduce((s,e) => s+n(e.ot_pay), 0),
+    extra:  detail.entries.reduce((s,e) => s+n(e.extra_work_pay), 0),
   } : null
 
   // ── Layout decision ───────────────────────────────────────────────────────
@@ -377,6 +378,7 @@ export default function PayrollRuns() {
             {[
               { l:'Gross Total',   v:fmt(totals.gross),  c:'#1d4ed8', bg:'#eff6ff' },
               { l:'OT Pay',        v:fmt(totals.ot_pay), c:'#7c3aed', bg:'#f5f3ff' },
+              { l:'Extra Work',    v:fmt(totals.extra),  c:'#0f766e', bg:'#ccfbf1' },
               { l:'PF (Employee)', v:fmt(totals.pf),     c:'#7c3aed', bg:'#f5f3ff' },
               { l:'ESI (Emp.)',    v:fmt(totals.esi),    c:'#2563eb', bg:'#eff6ff' },
               { l:'Prof. Tax',     v:fmt(totals.pt),     c:'#0891b2', bg:'#ecfeff' },
@@ -432,6 +434,8 @@ export default function PayrollRuns() {
                           <span style={{ color:'#aaa', fontWeight:400 }}>/{e.working_days}</span>
                         </div>
                         {(e.holiday_count > 0) && <div style={{ fontSize:'10px', color:'#1e40af', fontWeight:600, whiteSpace:'nowrap' }}>🗓 {e.holiday_count} holiday{e.holiday_count>1?'s':''}</div>}
+                        {n(e.extra_work_days) > 0 && <div style={{ fontSize:'10px', color:'#0f766e', fontWeight:600, whiteSpace:'nowrap' }}>+{parseFloat(e.extra_work_days).toFixed(1)} extra work</div>}
+                        {n(e.comp_off_days) > 0 && <div style={{ fontSize:'10px', color:'#6366f1', fontWeight:600, whiteSpace:'nowrap' }}>{parseFloat(e.comp_off_days).toFixed(1)} comp-off used</div>}
                         {hasLOP && <div style={{ fontSize:'10px', color:'#ea580c', fontWeight:600, whiteSpace:'nowrap' }}>⚡ {parseFloat(e.lop_days).toFixed(1)} LOP</div>}
                       </td>
                       <td style={TD}>
@@ -496,6 +500,7 @@ export default function PayrollRuns() {
                                 <Row key={r[0]} label={r[0]} value={fmt(r[1])} color={r[2]} />
                               ))}
                               <Row label="Gross" value={fmt(e.gross)} bold color="#1d4ed8" />
+                              {n(e.extra_work_pay)>0 && <Row label={`Extra work (${parseFloat(e.extra_work_days).toFixed(1)} day)`} value={fmt(e.extra_work_pay)} color="#0f766e" />}
                             </div>
 
                             {/* Deductions */}

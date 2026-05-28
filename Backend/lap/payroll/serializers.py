@@ -195,6 +195,7 @@ class PayrollEntrySerializer(serializers.ModelSerializer):
             'id', 'payroll_run', 'employee', 'employee_name', 'emp_code', 'department',
             'total_days', 'working_days', 'present_days', 'lop_days', 'ot_hours',
             'holiday_count', 'holiday_names',
+            'extra_work_days', 'extra_work_pay', 'extra_work_dates', 'comp_off_days',
             'basic', 'hra', 'da', 'special_allowance', 'transport', 'medical',
             'other_allowance', 'ot_pay',
             'pf_employee', 'esi_employee', 'pt', 'tds', 'lop_deduction',

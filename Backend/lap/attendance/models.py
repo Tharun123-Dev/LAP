@@ -59,6 +59,7 @@ class AttendanceRecord(models.Model):
         ('holiday',  'Holiday'),
         ('weekend',  'Weekend'),
         ('leave',    'On Leave'),
+        ('pending',  'Pending Correction'),
     ]
 
     employee     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='attendance_records')

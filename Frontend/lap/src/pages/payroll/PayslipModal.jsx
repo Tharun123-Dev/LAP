@@ -57,6 +57,7 @@ export default function PayslipModal({ entry, onClose }) {
   const monthName = run.month ? `${MONTHS[run.month]} ${run.year}` : 'Payslip'
   const hasLOP    = n(entry.lop_days) > 0
   const hasOT     = n(entry.ot_hours) > 0
+  const hasExtra  = n(entry.extra_work_days) > 0
   const hasAdj    = entry.adjustments?.length > 0
 
   // Live rates from payroll settings
@@ -81,6 +82,7 @@ export default function PayslipModal({ entry, onClose }) {
     { label: 'Medical Allowance',                                                   value: entry.medical },
     { label: 'Other Allowance',                                                     value: entry.other_allowance },
     { label: `Overtime Pay (${fmtD(entry.ot_hours)} hrs × ${otMult}× multiplier)`, value: entry.ot_pay, accent: '#7c3aed' },
+    { label: `Extra Work Pay (${fmtD(entry.extra_work_days)} weekend/holiday day)`, value: entry.extra_work_pay, accent: '#0f766e' },
   ].filter(e => n(e.value) > 0)
 
   const deductions = [
@@ -164,6 +166,8 @@ export default function PayslipModal({ entry, onClose }) {
               { l: 'Days Present', v: `${fmtD(entry.present_days)} days` },
               { l: 'LOP Days',     v: `${fmtD(entry.lop_days)} days`, accent: hasLOP ? '#dc2626' : null },
               { l: 'OT Hours',     v: hasOT ? `${fmtD(entry.ot_hours)} hrs` : '—', accent: hasOT ? '#7c3aed' : null },
+              { l: 'Extra Work',   v: hasExtra ? `${fmtD(entry.extra_work_days)} day(s)` : '—', accent: hasExtra ? '#0f766e' : null },
+              { l: 'Comp-Off Used', v: n(entry.comp_off_days) > 0 ? `${fmtD(entry.comp_off_days)} day(s)` : '—', accent: n(entry.comp_off_days) > 0 ? '#6366f1' : null },
             ].map(f => (
               <div key={f.l}>
                 <p style={{ margin: 0, fontSize: '10px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{f.l}</p>
@@ -214,6 +218,23 @@ export default function PayslipModal({ entry, onClose }) {
               {entry.holiday_names?.length > 0 && (
                 <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#3b82f6' }}>
                   {entry.holiday_names.join(' · ')}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── OT info ── */}
+        {hasExtra && (
+          <div style={{ padding: '11px 30px', background: '#f0fdfa', borderBottom: '2px solid #99f6e4', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+            <span style={{ fontSize: '18px', flexShrink: 0 }}>+</span>
+            <div>
+              <p style={{ margin: 0, fontSize: '13px', color: '#0f766e', fontWeight: 600 }}>
+                Extra work pay: {fmt(entry.extra_work_pay)} for {fmtD(entry.extra_work_days)} weekend/holiday day(s)
+              </p>
+              {entry.extra_work_dates?.length > 0 && (
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: '#0f766e' }}>
+                  {entry.extra_work_dates.filter(d => d.payable).map(d => `${d.date} (${d.type})`).join(' · ')}
                 </p>
               )}
             </div>

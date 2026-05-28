@@ -1,5 +1,5 @@
 # leave/views.py
-from datetime import date
+from datetime import date, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, generics
@@ -14,6 +14,52 @@ from .utils import (
     init_balances_for_employee, process_carry_forward,
     get_leave_balance_summary, sync_balances_for_leave_type,
 )
+
+COMP_OFF_CODES = {'COMP_OFF', 'COMP', 'CO', 'COMPENSATORY'}
+
+
+def _is_comp_off_type(leave_type):
+    return (leave_type.code or '').upper() in COMP_OFF_CODES
+
+
+def _comp_off_work_summary(employee, leave=None):
+    from attendance.models import AttendanceRecord, Holiday
+    from attendance.settings_helper import is_weekend
+
+    worked = []
+    qs = AttendanceRecord.objects.filter(
+        employee=employee,
+        check_in__isnull=False,
+        check_out__isnull=False,
+        status__in=['present', 'late', 'half_day', 'holiday'],
+    ).order_by('date')
+
+    for rec in qs:
+        is_holiday = Holiday.objects.filter(date=rec.date).exists()
+        if is_weekend(rec.date) or is_holiday:
+            worked.append({
+                'date': str(rec.date),
+                'type': 'holiday' if is_holiday else 'weekend',
+                'check_in': str(rec.check_in),
+                'check_out': str(rec.check_out),
+            })
+
+    used_qs = LeaveRequest.objects.filter(
+        employee=employee,
+        status__in=['approved', 'pending'],
+        leave_type__code__in=COMP_OFF_CODES,
+    )
+    if leave:
+        used_qs = used_qs.exclude(pk=leave.pk)
+
+    used_days = sum(float(r.days) for r in used_qs)
+    available = max(len(worked) - used_days, 0)
+    return {
+        'worked_days': len(worked),
+        'used_or_pending_days': used_days,
+        'available_days': available,
+        'worked_dates': worked,
+    }
 
 
 # ── LEAVE TYPES ───────────────────────────────────────────────────────────────
@@ -494,6 +540,17 @@ class LeaveActionView(APIView):
         if leave.status != 'pending':
             return Response({'error': f'Request is already {leave.status}'}, status=400)
 
+        if action == 'approve' and _is_comp_off_type(leave.leave_type):
+            comp_summary = _comp_off_work_summary(leave.employee, leave)
+            if float(leave.days) > comp_summary['available_days']:
+                return Response({
+                    'error': (
+                        f'Insufficient compensatory balance. Available: '
+                        f"{comp_summary['available_days']} day(s), requested: {float(leave.days)}"
+                    ),
+                    'comp_off': comp_summary,
+                }, status=400)
+
         leave.status       = 'approved' if action == 'approve' else 'rejected'
         leave.approved_by  = request.user
         leave.approver_note = note
@@ -601,9 +658,11 @@ class LeavePriorUsageView(APIView):
             annual_balance = None
 
         import calendar
+        comp_summary = _comp_off_work_summary(employee, leave) if _is_comp_off_type(leave_type) else None
         return Response({
             'employee_name':    employee.get_full_name() or employee.username,
             'leave_type':       leave_type.name,
+            'leave_code':       leave_type.code,
             'month':            f'{calendar.month_name[month]} {year}',
             'requested_days':   float(leave.days),
             'prior_approved':   [fmt(r) for r in prior_approved],
@@ -611,6 +670,8 @@ class LeavePriorUsageView(APIView):
             'total_prior_days': total_prior_days,
             'annual_balance':   annual_balance,
             'has_prior':        total_prior_days > 0,
+            'is_compensatory':   comp_summary is not None,
+            'comp_off':         comp_summary,
         })
 # ── LEAVE POLICY SETTINGS SYNC ────────────────────────────────────────────────
 

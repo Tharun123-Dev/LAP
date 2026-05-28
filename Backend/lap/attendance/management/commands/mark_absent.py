@@ -131,7 +131,7 @@ class Command(BaseCommand):
             if not emp.is_active:
                 continue
 
-            rec.status = 'absent'
+            rec.status = 'pending'
             rec.hours_worked = 0
             rec.ot_hours = 0
 
@@ -139,8 +139,7 @@ class Command(BaseCommand):
                 rec.note + ' | '
                 if rec.note else ''
             ) + (
-                'AUTO ABSENT: missing checkout '
-                '→ full LOP deduction'
+                'PENDING CORRECTION: missing checkout'
             )
 
             rec.save(update_fields=[
@@ -153,10 +152,10 @@ class Command(BaseCommand):
             job1_marked += 1
 
             self.stdout.write(
-                f'  [AUTO ABSENT] '
+                f'  [PENDING] '
                 f'{emp.get_full_name() or emp.username} '
                 f'— missing checkout on {yesterday} '
-                f'→ ABSENT (1 LOP)'
+                f'→ PENDING'
             )
 
         # ─────────────────────────────────────────────
@@ -186,13 +185,12 @@ class Command(BaseCommand):
                 employee=emp,
                 date=today,
                 defaults={
-                    'status': 'absent',
+                    'status': 'pending',
                     'hours_worked': 0,
                     'ot_hours': 0,
                     'note': (
-                        'AUTO ABSENT: '
-                        'no check-in recorded '
-                        '→ full LOP deduction'
+                        'PENDING CORRECTION: '
+                        'no check-in recorded'
                     ),
                 },
             )
@@ -200,10 +198,10 @@ class Command(BaseCommand):
             job2_marked += 1
 
             self.stdout.write(
-                f'  [ABSENT] '
+                f'  [PENDING] '
                 f'{emp.get_full_name() or emp.username} '
                 f'— no check-in today '
-                f'→ ABSENT (1 LOP)'
+                f'→ PENDING'
             )
 
         # ─────────────────────────────────────────────
@@ -213,8 +211,8 @@ class Command(BaseCommand):
         self.stdout.write(
             self.style.SUCCESS(
                 f'\n{today} completed:\n'
-                f'  Missing checkout → {job1_marked} absent\n'
-                f'  No check-in      → {job2_marked} absent\n'
+                f'  Missing checkout → {job1_marked} pending\n'
+                f'  No check-in      → {job2_marked} pending\n'
                 f'  Total marked     → {job1_marked + job2_marked}'
             )
         )

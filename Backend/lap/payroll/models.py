@@ -240,6 +240,10 @@ class PayrollEntry(models.Model):
     # Public holidays this month — stored so payslip can display them
     holiday_count  = models.IntegerField(default=0)
     holiday_names  = models.JSONField(default=list, blank=True)  # e.g. ["Diwali", "Dussehra"]
+    extra_work_days = models.DecimalField(max_digits=5, decimal_places=1, default=0)
+    extra_work_pay  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    extra_work_dates = models.JSONField(default=list, blank=True)
+    comp_off_days   = models.DecimalField(max_digits=5, decimal_places=1, default=0)
 
     # Earnings (pro-rated)
     basic          = models.DecimalField(max_digits=10, decimal_places=2, default=0)
