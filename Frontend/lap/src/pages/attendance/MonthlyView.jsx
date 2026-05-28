@@ -36,7 +36,7 @@ export default function MonthlyView() {
   const [weekendDays,      setWeekendDays] = useState(['saturday', 'sunday'])
   const [workDaysPerWeek,  setWorkDays]    = useState(5)
   const [shiftStart,       setShiftStart]  = useState('09:00')
-
+  
   // Load weekend / shift settings once
   useEffect(() => {
     systemSettingsService.getAll().then((res) => {
