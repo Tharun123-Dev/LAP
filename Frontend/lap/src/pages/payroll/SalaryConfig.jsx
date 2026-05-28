@@ -21,7 +21,10 @@ const FALLBACK = {
   transport:       1600,
   medical:         1250,
   other_allowance: 0,
-  pt:              0,   // PT comes from System Settings pt_flat_amount, not stored on structure
+  pt:              200,
+  pt_threshold:    15000,
+  pt_below:        0,
+  pt_above:        200,
   hra_metro:       50,
   hra_nonmetro:    40,
   pf_employer:     12,
@@ -50,10 +53,11 @@ function makeEmpty(defaults) {
 
 // Live preview for the modal form
 // esiThreshold from system settings — ESI only applies if gross <= threshold
-function computePreview(form, esiThreshold) {
+function computePreview(form, defaults) {
   const ctc = n(form.ctc)
   if (!ctc) return null
-  const thr       = (n(esiThreshold) >= 1000) ? n(esiThreshold) : 21000
+  const thr       = (n(defaults.esi_threshold) >= 1000) ? n(defaults.esi_threshold) : 21000
+  const ptThr     = n(defaults.pt_threshold || 15000)
   const monthly   = ctc / 12
   const basic     = monthly * (n(form.basic_percent) / 100)
   const hra       = basic   * (n(form.hra_percent) / 100)
@@ -61,9 +65,9 @@ function computePreview(form, esiThreshold) {
   const transport = n(form.transport)
   const medical   = n(form.medical)
   const other     = n(form.other_allowance)
-  const pt        = n(form.pt)
   const special   = Math.max(monthly - basic - hra - da - transport - medical - other, 0)
   const gross     = basic + hra + da + special + transport + medical + other
+  const pt        = gross <= ptThr ? n(defaults.pt_below) : n(defaults.pt_above)
   const pf_emp    = basic * (n(form.pf_percent) / 100)
   const esi_emp   = gross <= thr ? gross * (n(form.esi_percent) / 100) : 0
   const total_ded = pf_emp + esi_emp + pt
@@ -108,7 +112,10 @@ export default function SalaryConfig() {
           transport:       d.default_transport       ?? 1600,
           medical:         d.default_medical         ?? 1250,
           other_allowance: d.default_other_allowance ?? 0,
-          pt:              d.pt_flat_amount           ?? 200,  // live PT from System Settings
+          pt:              d.pt_above_threshold_amount ?? d.pt_flat_amount ?? 200,
+          pt_threshold:    d.pt_threshold_salary       ?? 15000,
+          pt_below:        d.pt_below_threshold_amount ?? 0,
+          pt_above:        d.pt_above_threshold_amount ?? d.pt_flat_amount ?? 200,
           hra_metro:       d.hra_percent_metro       ?? 50,
           hra_nonmetro:    d.hra_percent_nonmetro    ?? 40,
           pf_employer:     d.pf_employer_percent     ?? 12,
@@ -124,7 +131,7 @@ export default function SalaryConfig() {
       .catch(() => { setSettingsLoaded(true) })
   }, [])
 
-  useEffect(() => { setPreview(computePreview(form, sysDefaults.esi_threshold)) }, [form, sysDefaults.esi_threshold])
+  useEffect(() => { setPreview(computePreview(form, sysDefaults)) }, [form, sysDefaults])
 
   const set  = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
 
@@ -375,8 +382,10 @@ export default function SalaryConfig() {
                 </Sect>
 
                 <Sect title="Professional Tax">
-                  <F label="PT (₹/mo) — leave 0 to auto-use System Settings value">
-                    <input type="number" value={form.pt} onChange={set('pt')} style={inp} disabled />
+                  <F label="PT slab from System Settings">
+                    <div style={{ background:'#ecfeff', border:'1px solid #bae6fd', borderRadius:'8px', padding:'10px 14px', fontSize:'11px', color:'#0e7490' }}>
+                      Gross up to {fmt(sysDefaults.pt_threshold)}: PT {fmt(sysDefaults.pt_below)} / mo. Above {fmt(sysDefaults.pt_threshold)}: PT {fmt(sysDefaults.pt_above)} / mo.
+                    </div>
                   </F>
                 </Sect>
 

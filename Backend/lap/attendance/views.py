@@ -29,6 +29,10 @@ from .serializers import (
 from .settings_helper import (
     get_shift_start,
     get_shift_end,
+    get_night_shift_enabled,
+    get_night_shift_start,
+    get_night_shift_end,
+    get_active_shift_for_time,
     get_grace_minutes,
     get_standard_hours,
     get_half_day_hours,
@@ -47,19 +51,147 @@ def _now_time_local() -> time:
     return _now_local().time().replace(tzinfo=None)
 
 
-def _get_status(check_in, check_out, hours_worked):
+def _snapshot_shift_policy(record, check_in_time=None):
+    active_shift = get_active_shift_for_time(check_in_time or record.check_in or _now_time_local())
+    record.shift_type = active_shift['type']
+    record.shift_start_snapshot = active_shift['start']
+    record.shift_end_snapshot = active_shift['end']
+    record.grace_minutes_snapshot = get_grace_minutes()
+    record.standard_hours_snapshot = Decimal(str(get_standard_hours()))
+    record.half_day_hours_snapshot = Decimal(str(get_half_day_hours()))
+    record.is_overnight_shift = active_shift['is_overnight']
+
+
+def _snapshot_shift_policy_for_type(record, shift_type=None):
+    shift_type = shift_type or getattr(record, 'shift_type', 'day') or 'day'
+    if shift_type == 'night' and get_night_shift_enabled():
+        shift_start = get_night_shift_start()
+        shift_end = get_night_shift_end()
+        record.shift_type = 'night'
+    else:
+        shift_start = get_shift_start()
+        shift_end = get_shift_end()
+        record.shift_type = 'day'
+    record.shift_start_snapshot = shift_start
+    record.shift_end_snapshot = shift_end
+    record.grace_minutes_snapshot = get_grace_minutes()
+    record.standard_hours_snapshot = Decimal(str(get_standard_hours()))
+    record.half_day_hours_snapshot = Decimal(str(get_half_day_hours()))
+    record.is_overnight_shift = shift_end <= shift_start
+
+
+def _refresh_record_from_current_policy(record):
+    if not record or record.is_locked:
+        return record
+    _snapshot_shift_policy_for_type(record, record.shift_type)
+    if record.check_in and not record.check_in_at:
+        record.check_in_at, record.check_out_at = _infer_attendance_datetimes(record)
+    elif record.check_in and record.check_out and not record.check_out_at:
+        _, record.check_out_at = _infer_attendance_datetimes(record)
+    if record.check_in and record.check_out:
+        record.hours_worked = Decimal(str(record.calculate_hours()))
+        record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out, record)
+        record.status = _get_status(record.check_in, record.check_out, record.hours_worked, record)
+    return record
+
+
+def _attendance_date_for_shift(user, now_dt, active_shift):
+    now_date = now_dt.date()
+    now_time = now_dt.time().replace(tzinfo=None)
+    if (
+        active_shift['type'] == 'night'
+        and active_shift['is_overnight']
+        and now_time >= active_shift['start']
+    ):
+        day_shift_completed = AttendanceRecord.objects.filter(
+            employee=user,
+            date=now_date,
+            shift_type='day',
+            check_in__isnull=False,
+            check_out__isnull=False,
+        ).exists()
+        if day_shift_completed:
+            return now_date + timedelta(days=1)
+    return now_date
+
+
+def _combine_local(day, clock):
+    value = datetime.combine(day, clock)
+    return timezone.make_aware(value, timezone.get_current_timezone())
+
+
+def _shift_window_for_record(record):
+    shift_start = getattr(record, 'shift_start_snapshot', None) or get_shift_start()
+    shift_end = getattr(record, 'shift_end_snapshot', None) or get_shift_end()
+    is_overnight = bool(
+        getattr(record, 'is_overnight_shift', False)
+        or shift_end <= shift_start
+    )
+
+    start_date = record.date
+    if is_overnight and record.check_in_at and record.check_in_at.date() < record.date:
+        start_date = record.date - timedelta(days=1)
+
+    start = _combine_local(start_date, shift_start)
+    end = _combine_local(start_date, shift_end)
+    if is_overnight or end <= start:
+        end += timedelta(days=1)
+    return start, end
+
+
+def _infer_attendance_datetimes(record):
+    if not record.check_in:
+        return None, None
+    shift_start = getattr(record, 'shift_start_snapshot', None) or get_shift_start()
+    shift_end = getattr(record, 'shift_end_snapshot', None) or get_shift_end()
+    is_overnight = bool(
+        getattr(record, 'is_overnight_shift', False)
+        or shift_end <= shift_start
+    )
+    check_in_date = record.date
+    if is_overnight and record.check_in < shift_end:
+        check_in_date = record.date - timedelta(days=1)
+    elif is_overnight and getattr(record, 'shift_type', '') == 'night':
+        previous_day_completed = AttendanceRecord.objects.filter(
+            employee=record.employee,
+            date=record.date - timedelta(days=1),
+            shift_type='day',
+            check_in__isnull=False,
+            check_out__isnull=False,
+        ).exists()
+        if previous_day_completed:
+            check_in_date = record.date - timedelta(days=1)
+
+    ci = record.check_in_at or _combine_local(check_in_date, record.check_in)
+    co = None
+    if record.check_out:
+        check_out_date = check_in_date
+        if is_overnight and record.check_out <= shift_start:
+            check_out_date = check_in_date + timedelta(days=1)
+        co = record.check_out_at or _combine_local(check_out_date, record.check_out)
+        if co <= ci:
+            co += timedelta(days=1)
+    return ci, co
+
+
+def _get_status(check_in, check_out, hours_worked, record=None):
     if not check_in:
         return 'absent'
     if not check_out:
         return 'half_day'
 
-    shift_start    = get_shift_start()
-    grace_minutes  = get_grace_minutes()
-    half_day_hours = Decimal(str(get_half_day_hours()))
+    shift_start    = getattr(record, 'shift_start_snapshot', None) or get_shift_start()
+    grace_minutes  = getattr(record, 'grace_minutes_snapshot', None) or get_grace_minutes()
+    half_day_hours = getattr(record, 'half_day_hours_snapshot', None) or Decimal(str(get_half_day_hours()))
 
-    ref_date     = date(2000, 1, 1)
-    grace_cutoff = datetime.combine(ref_date, shift_start) + timedelta(minutes=grace_minutes)
-    ci           = datetime.combine(ref_date, check_in)
+    if record and record.check_in_at:
+        shift_start_at, _ = _shift_window_for_record(record)
+        grace_cutoff = shift_start_at + timedelta(minutes=grace_minutes)
+        ci = record.check_in_at
+    else:
+        ref_date     = date(2000, 1, 1)
+        grace_cutoff = datetime.combine(ref_date, shift_start) + timedelta(minutes=grace_minutes)
+        ci           = datetime.combine(ref_date, check_in)
 
     if hours_worked < half_day_hours:
         return 'half_day'
@@ -68,18 +200,27 @@ def _get_status(check_in, check_out, hours_worked):
     return 'present'
 
 
-def _calculate_ot_hours(check_in, check_out):
+def _calculate_ot_hours(check_in, check_out, record=None):
     if not check_in or not check_out:
         return Decimal('0')
 
-    shift_end = get_shift_end()
-    shift_start = get_shift_start()
-    grace_minutes = get_grace_minutes()
-    ref_date = date(2000, 1, 1)
-    ci = datetime.combine(ref_date, check_in)
-    co = datetime.combine(ref_date, check_out)
-    start = datetime.combine(ref_date, shift_start)
-    end = datetime.combine(ref_date, shift_end)
+    shift_end = getattr(record, 'shift_end_snapshot', None) or get_shift_end()
+    shift_start = getattr(record, 'shift_start_snapshot', None) or get_shift_start()
+    grace_minutes = getattr(record, 'grace_minutes_snapshot', None) or get_grace_minutes()
+    if record and record.check_in_at and record.check_out_at:
+        ci = record.check_in_at
+        co = record.check_out_at
+        start, end = _shift_window_for_record(record)
+    else:
+        ref_date = date(2000, 1, 1)
+        ci = datetime.combine(ref_date, check_in)
+        co = datetime.combine(ref_date, check_out)
+        start = datetime.combine(ref_date, shift_start)
+        end = datetime.combine(ref_date, shift_end)
+        if co <= ci:
+            co += timedelta(days=1)
+        if end <= start:
+            end += timedelta(days=1)
     grace_cutoff = start + timedelta(minutes=grace_minutes)
     late_minutes = max((ci - grace_cutoff).total_seconds() / 60, 0)
     ot_start = end + timedelta(minutes=late_minutes)
@@ -145,9 +286,12 @@ class CheckInView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def post(self, request):
-        today    = _today_local()
         is_wfh   = request.data.get('is_wfh', False)
-        now_time = _now_time_local()
+        now_dt   = _now_local()
+        now_time = now_dt.time().replace(tzinfo=None)
+        active_shift = get_active_shift_for_time(now_time)
+        attendance_date = _attendance_date_for_shift(request.user, now_dt, active_shift)
+        shift_type = active_shift['type']
 
         if not is_wfh:
             lat = request.data.get('latitude')
@@ -161,13 +305,27 @@ class CheckInView(APIView):
         else:
             lat, lon, distance_m = None, None, None
 
-        existing = AttendanceRecord.objects.filter(employee=request.user, date=today).first()
+        open_record = AttendanceRecord.objects.filter(
+            employee=request.user,
+            check_in__isnull=False,
+            check_out__isnull=True,
+        ).order_by('-check_in_at', '-created_at').first()
+        if open_record:
+            return Response({'error': 'Please check out from your open shift before checking in again'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = AttendanceRecord.objects.filter(
+            employee=request.user,
+            date=attendance_date,
+            shift_type=shift_type,
+        ).first()
         if existing and existing.check_in:
-            return Response({'error': 'Already checked in today'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': f'Already checked in for {shift_type} shift'}, status=status.HTTP_400_BAD_REQUEST)
 
         if existing:
             existing.check_in = now_time
+            existing.check_in_at = now_dt
             existing.is_wfh   = is_wfh
+            _snapshot_shift_policy(existing, now_time)
             if lat is not None:
                 existing.checkin_latitude   = lat
                 existing.checkin_longitude  = lon
@@ -175,11 +333,14 @@ class CheckInView(APIView):
             existing.save()
             record = existing
         else:
-            record = AttendanceRecord.objects.create(
-                employee=request.user, date=today, check_in=now_time,
+            record = AttendanceRecord(
+                employee=request.user, date=attendance_date, shift_type=shift_type, check_in=now_time,
+                check_in_at=now_dt,
                 is_wfh=is_wfh, status='present',
                 checkin_latitude=lat, checkin_longitude=lon, checkin_distance_m=distance_m,
             )
+            _snapshot_shift_policy(record, now_time)
+            record.save()
         return Response(AttendanceRecordSerializer(record).data, status=status.HTTP_200_OK)
 
 
@@ -190,13 +351,19 @@ class CheckOutView(APIView):
 
     def post(self, request):
         today    = _today_local()
-        now_time = _now_time_local()
+        now_dt   = _now_local()
+        now_time = now_dt.time().replace(tzinfo=None)
         lat = request.data.get('latitude')
         lon = request.data.get('longitude')
 
-        record = AttendanceRecord.objects.filter(employee=request.user, date=today).first()
+        record = AttendanceRecord.objects.filter(
+            employee=request.user,
+            check_in__isnull=False,
+            check_out__isnull=True,
+            date__lte=today,
+        ).order_by('-date', '-created_at').first()
         if not record or not record.check_in:
-            return Response({'error': 'No check-in found for today'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'No open check-in found'}, status=status.HTTP_400_BAD_REQUEST)
         if record.check_out:
             return Response({'error': 'Already checked out today'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -211,16 +378,19 @@ class CheckOutView(APIView):
             distance_m = None
 
         record.check_out    = now_time
+        record.check_out_at = now_dt
+        if not record.check_in_at:
+            record.check_in_at, _ = _infer_attendance_datetimes(record)
         record.hours_worked = Decimal(str(record.calculate_hours()))
 
-        record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out)
+        record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out, record)
 
         if lat is not None and not record.is_wfh:
             record.checkout_latitude   = lat
             record.checkout_longitude  = lon
             record.checkout_distance_m = distance_m
 
-        record.status = _get_status(record.check_in, record.check_out, record.hours_worked)
+        record.status = _get_status(record.check_in, record.check_out, record.hours_worked, record)
         record.save()
         return Response(AttendanceRecordSerializer(record).data)
 
@@ -232,7 +402,13 @@ class TodayAttendanceView(APIView):
 
     def get(self, request):
         today   = _today_local()
-        record  = AttendanceRecord.objects.filter(employee=request.user, date=today).first()
+        record = AttendanceRecord.objects.filter(
+            employee=request.user,
+            check_in__isnull=False,
+            check_out__isnull=True,
+        ).order_by('-check_in_at', '-created_at').first()
+        if not record:
+            record  = AttendanceRecord.objects.filter(employee=request.user, date=today).order_by('-shift_type').first()
         holiday = Holiday.objects.filter(date=today).first()
         return Response({
             'record':  AttendanceRecordSerializer(record).data if record else None,
@@ -256,6 +432,49 @@ class MyAttendanceView(APIView):
             employee=request.user, date__year=year, date__month=month,
         ).order_by('date')
 
+        for record in records:
+            original = (
+                record.shift_start_snapshot,
+                record.shift_end_snapshot,
+                record.grace_minutes_snapshot,
+                record.standard_hours_snapshot,
+                record.half_day_hours_snapshot,
+                record.is_overnight_shift,
+                record.check_in_at,
+                record.check_out_at,
+                record.hours_worked,
+                record.ot_hours,
+                record.status,
+            )
+            _refresh_record_from_current_policy(record)
+            updated = (
+                record.shift_start_snapshot,
+                record.shift_end_snapshot,
+                record.grace_minutes_snapshot,
+                record.standard_hours_snapshot,
+                record.half_day_hours_snapshot,
+                record.is_overnight_shift,
+                record.check_in_at,
+                record.check_out_at,
+                record.hours_worked,
+                record.ot_hours,
+                record.status,
+            )
+            if updated != original:
+                record.save(update_fields=[
+                    'shift_start_snapshot',
+                    'shift_end_snapshot',
+                    'grace_minutes_snapshot',
+                    'standard_hours_snapshot',
+                    'half_day_hours_snapshot',
+                    'is_overnight_shift',
+                    'check_in_at',
+                    'check_out_at',
+                    'hours_worked',
+                    'ot_hours',
+                    'status',
+                ])
+
         from leave.models import LeaveRequest
         approved_leaves = LeaveRequest.objects.filter(
             employee=request.user, status='approved',
@@ -275,7 +494,9 @@ class MyAttendanceView(APIView):
         holidays = list(Holiday.objects.filter(date__year=year, date__month=month).values('date', 'name'))
         holiday_date_set = {str(h['date']) for h in holidays}
 
-        record_map     = {str(r.date): r for r in records}
+        record_map = {}
+        for r in records:
+            record_map.setdefault(str(r.date), []).append(r)
         existing_dates = set(record_map.keys())
         serialized     = list(AttendanceRecordSerializer(records, many=True).data)
 
@@ -283,7 +504,19 @@ class MyAttendanceView(APIView):
 
         # Missing checkout is not final until corrected/approved.
         for rec in serialized:
-            if rec.get('check_in') and not rec.get('check_out') and rec.get('date') != today_str:
+            source_records = record_map.get(rec.get('date'), [])
+            open_shift_still_running = False
+            for source_record in source_records:
+                expected_end = source_record.expected_shift_end_at()
+                if expected_end and _now_local() <= expected_end:
+                    open_shift_still_running = True
+                    break
+            if (
+                rec.get('check_in')
+                and not rec.get('check_out')
+                and rec.get('date') != today_str
+                and not open_shift_still_running
+            ):
                 rec['status'] = 'pending'
                 rec['pending_reason'] = 'missing_checkout'
 
@@ -355,8 +588,28 @@ class MyAttendanceView(APIView):
 
         # ── Summary ───────────────────────────────────────────────────────────
         status_counts = {}
+        grouped_serialized = {}
         for rec in serialized:
-            st = rec.get('status', 'absent')
+            grouped_serialized.setdefault(rec.get('date'), []).append(rec)
+
+        for day_records in grouped_serialized.values():
+            statuses = [r.get('status', 'absent') for r in day_records]
+            if 'late' in statuses:
+                st = 'late'
+            elif 'present' in statuses:
+                st = 'present'
+            elif 'half_day' in statuses:
+                st = 'half_day'
+            elif 'holiday' in statuses:
+                st = 'holiday'
+            elif 'leave' in statuses:
+                st = 'leave'
+            elif 'lop_leave' in statuses:
+                st = 'lop_leave'
+            elif 'pending' in statuses:
+                st = 'pending'
+            else:
+                st = statuses[0] if statuses else 'absent'
             status_counts[st] = status_counts.get(st, 0) + 1
 
         summary = {
@@ -389,6 +642,9 @@ class MyAttendanceView(APIView):
                 'shift_start':   shift_start.strftime('%H:%M'),
                 'grace_minutes': grace_minutes,
                 'late_cutoff':   late_cutoff,
+                'night_shift_enabled': get_night_shift_enabled(),
+                'night_shift_start':   get_night_shift_start().strftime('%H:%M'),
+                'night_shift_end':     get_night_shift_end().strftime('%H:%M'),
             },
         })
 
@@ -424,6 +680,7 @@ class ApplyRegularizationView(APIView):
         reason             = request.data.get('reason', '')
         requested_checkin  = request.data.get('requested_checkin')
         requested_checkout = request.data.get('requested_checkout')
+        shift_type         = request.data.get('shift_type', 'day')
 
         if attendance_id:
             try:
@@ -436,11 +693,34 @@ class ApplyRegularizationView(APIView):
             except ValueError:
                 return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
 
+            if shift_type == 'night':
+                day_shift_completed = AttendanceRecord.objects.filter(
+                    employee=request.user,
+                    date=parsed_date,
+                    shift_type='day',
+                    check_in__isnull=False,
+                    check_out__isnull=False,
+                ).exists()
+                if day_shift_completed:
+                    parsed_date = parsed_date + timedelta(days=1)
+
             record, _ = AttendanceRecord.objects.get_or_create(
                 employee=request.user,
                 date=parsed_date,
+                shift_type=shift_type,
                 defaults={'status': 'pending', 'note': 'Pending regularization request'},
             )
+            if not record.shift_start_snapshot or not record.shift_end_snapshot:
+                _snapshot_shift_policy_for_type(record, shift_type)
+                record.save(update_fields=[
+                    'shift_type',
+                    'shift_start_snapshot',
+                    'shift_end_snapshot',
+                    'grace_minutes_snapshot',
+                    'standard_hours_snapshot',
+                    'half_day_hours_snapshot',
+                    'is_overnight_shift',
+                ])
         else:
             return Response({'error': 'attendance_id or date is required'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -513,14 +793,35 @@ class ApproveRegularizationView(APIView):
                 record.check_in  = reg.requested_checkin
             if reg.requested_checkout:
                 record.check_out = reg.requested_checkout
+            if not record.shift_start_snapshot or not record.shift_end_snapshot:
+                _snapshot_shift_policy_for_type(record, record.shift_type)
+            if record.check_in:
+                inferred_check_in, inferred_check_out = _infer_attendance_datetimes(record)
+                record.check_in_at = inferred_check_in
+                record.check_out_at = inferred_check_out
             if record.check_in and record.check_out:
                 record.hours_worked = Decimal(str(record.calculate_hours()))
-                record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out)
-                record.status = _get_status(record.check_in, record.check_out, record.hours_worked)
+                record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out, record)
+                record.status = _get_status(record.check_in, record.check_out, record.hours_worked, record)
             record.save()
 
         reg.save()
-        return Response({'message': f'Regularisation {reg.status}', 'data': RegularizationSerializer(reg).data})
+        carry_forward = None
+        if action == 'approve':
+            try:
+                from payroll.engine import queue_locked_regularization_adjustment
+                carry_forward = queue_locked_regularization_adjustment(reg)
+            except Exception:
+                carry_forward = None
+        payload = {'message': f'Regularisation {reg.status}', 'data': RegularizationSerializer(reg).data}
+        if carry_forward:
+            payload['payroll_carry_forward'] = {
+                'amount': float(carry_forward.amount),
+                'source_month': carry_forward.source_month,
+                'source_year': carry_forward.source_year,
+                'status': carry_forward.status,
+            }
+        return Response(payload)
 
 
 # ── HOLIDAYS — LIST / CREATE ──────────────────────────────────────────────────

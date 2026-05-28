@@ -32,6 +32,21 @@ SETTINGS = [
         description='Official shift end time (HH:MM). Used for OT calculation.',
     ),
     dict(
+        key='night_shift_enabled', value='false', value_type='boolean', category='attendance',
+        label='Night Shift Enabled',
+        description='If true, check-ins during the configured night window use night shift timings.',
+    ),
+    dict(
+        key='night_shift_start_time', value='22:00', value_type='time', category='attendance',
+        label='Night Shift Start Time',
+        description='Official night shift start time (HH:MM). Example: 22:00.',
+    ),
+    dict(
+        key='night_shift_end_time', value='06:00', value_type='time', category='attendance',
+        label='Night Shift End Time',
+        description='Official night shift end time (HH:MM). Next-day checkout is handled automatically.',
+    ),
+    dict(
         key='work_hours_per_day', value='8', value_type='integer', category='attendance',
         label='Work Hours Per Day',
         description='Standard working hours per day. Affects OT pay rate.',
@@ -246,6 +261,21 @@ SETTINGS = [
 
     # ═══════════════ GENERAL ═══════════════
     dict(
+        key='pt_threshold_salary', value='15000', value_type='integer', category='payroll',
+        label='Professional Tax Gross Threshold',
+        description='Monthly gross threshold for PT. Gross below/equal this uses below-threshold PT; above this uses above-threshold PT.',
+    ),
+    dict(
+        key='pt_below_threshold_amount', value='0', value_type='integer', category='payroll',
+        label='Professional Tax Below Threshold',
+        description='PT deducted when monthly gross salary is below/equal to the PT threshold.',
+    ),
+    dict(
+        key='pt_above_threshold_amount', value='200', value_type='integer', category='payroll',
+        label='Professional Tax Above Threshold',
+        description='PT deducted when monthly gross salary is above the PT threshold. Prorated by attendance days in payroll.',
+    ),
+    dict(
         key='company_name', value='My Company', value_type='string', category='general',
         label='Company Name',
         description='Shown in payslip header, emails, and reports.',
@@ -315,5 +345,5 @@ class Command(BaseCommand):
                 created += 1
 
         self.stdout.write(self.style.SUCCESS(
-            f'✓ Done: {created} created, {updated} updated ({len(seen_keys)} total settings).'
+            f'Done: {created} created, {updated} updated ({len(seen_keys)} total settings).'
         ))

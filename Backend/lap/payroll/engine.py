@@ -20,6 +20,7 @@ CALCULATION METHOD: Full-Pay + Explicit-LOP
 import calendar
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, timedelta
+from django.utils import timezone
 
 from accounts.models import User
 from attendance.models import AttendanceRecord
@@ -27,11 +28,14 @@ from attendance.settings_helper import (
     get_late_per_half_day, get_working_days_in_month, is_weekend,
     get_pf_employee_percent, get_pf_employer_percent,
     get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
-    get_tds_flat_contract, get_pt_slabs, get_pt_flat_amount, get_overtime_multiplier,
+    get_tds_flat_contract, calculate_professional_tax, get_overtime_multiplier,
     get_da_percent, get_auto_absent_enabled,
 )
 from leave.models import LeaveRequest
-from .models import SalaryStructure, PayrollRun, PayrollEntry
+from .models import (
+    SalaryStructure, PayrollRun, PayrollEntry,
+    PayrollAdjustment, PayrollCarryForwardAdjustment,
+)
 
 
 ROUND2 = lambda v: Decimal(str(v)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -84,13 +88,7 @@ def calculate_late_lop(late_count: int) -> Decimal:
 
 
 def calculate_pt(gross: Decimal = None) -> Decimal:
-    """
-    PT = flat amount from System Settings (pt_flat_amount key).
-    Enter e.g. 200 in System Settings → deducts ₹200/month (prorated by attendance).
-    Enter 0 → no PT deduction.
-    gross param kept for signature compatibility but not used.
-    """
-    return ROUND2(get_pt_flat_amount())
+    return ROUND2(calculate_professional_tax(gross))
 
 
 def calculate_tds(effective_gross: Decimal, emp_type: str) -> Decimal:
@@ -122,6 +120,208 @@ def calculate_ot_pay(basic: Decimal, working_days: int, ot_hours: Decimal) -> De
     return ROUND2(hourly_rate * multiplier * ot_hours)
 
 
+def calculate_employee_payroll_values(emp, structure, year, month):
+    working_days, days_in_month = get_working_days_in_month(year, month)
+    att = get_attendance_summary(emp, year, month)
+    present = att['present']
+    lop_days = att['lop_days']
+    late_lop = att['late_lop']
+    total_lop = lop_days + late_lop
+    ot_hours = att['ot_hours']
+    extra_work_days = Decimal(str(att.get('extra_work_days', 0)))
+    extra_work_dates = att.get('extra_work_dates', [])
+    comp_off_days = Decimal(str(att.get('comp_off_days', 0)))
+
+    effective_present = max(
+        min(Decimal(str(working_days)) - total_lop, Decimal(str(working_days))),
+        Decimal('0'),
+    )
+
+    pf_emp_pct = get_pf_employee_percent() / Decimal('100')
+    esi_emp_pct = get_esi_employee_percent() / Decimal('100')
+    esi_threshold = get_esi_threshold()
+    da_pct_live = get_da_percent() / Decimal('100')
+
+    basic = ROUND2(structure.basic)
+    hra = ROUND2(structure.hra)
+    da = ROUND2(basic * da_pct_live)
+    transport = ROUND2(structure.transport)
+    medical = ROUND2(structure.medical)
+    other = ROUND2(structure.other_allowance)
+
+    monthly_ctc = ROUND2(Decimal(str(structure.ctc)) / Decimal('12'))
+    special = ROUND2(monthly_ctc - basic - hra - da - transport - medical - other)
+    special = max(special, Decimal('0'))
+
+    ot_pay = calculate_ot_pay(basic, working_days, ot_hours)
+    base_gross = basic + hra + da + special + transport + medical + other
+    extra_work_pay = ROUND2((base_gross / Decimal(str(working_days))) * extra_work_days) if working_days > 0 else Decimal('0')
+    gross = base_gross + ot_pay + extra_work_pay
+
+    structure_gross = gross - ot_pay
+    if working_days > 0 and total_lop > 0:
+        per_day_rate = ROUND2(structure_gross / Decimal(str(working_days)))
+        lop_deduction = ROUND2(per_day_rate * total_lop)
+    else:
+        lop_deduction = Decimal('0')
+    lop_deduction = min(lop_deduction, structure_gross)
+
+    effective_gross = max(ROUND2(gross - lop_deduction), Decimal('0'))
+    ratio = (effective_present / Decimal(str(working_days))) if working_days > 0 else Decimal('0')
+
+    pf_emp = ROUND2(basic * pf_emp_pct * ratio)
+    esi_emp = ROUND2(effective_gross * esi_emp_pct * ratio) if effective_gross <= esi_threshold else Decimal('0')
+    pt = ROUND2(calculate_pt(effective_gross) * ratio)
+    tds = calculate_tds(effective_gross, emp.employee_type)
+
+    total_deductions = ROUND2(pf_emp + esi_emp + pt + tds + lop_deduction)
+    net_pay = max(ROUND2(gross - total_deductions), Decimal('0'))
+
+    return {
+        'att': att,
+        'days_in_month': days_in_month,
+        'working_days': working_days,
+        'effective_present': effective_present,
+        'total_lop': total_lop,
+        'ot_hours': ot_hours,
+        'extra_work_days': extra_work_days,
+        'extra_work_dates': extra_work_dates,
+        'comp_off_days': comp_off_days,
+        'basic': basic,
+        'hra': hra,
+        'da': da,
+        'special': special,
+        'transport': transport,
+        'medical': medical,
+        'other': other,
+        'ot_pay': ot_pay,
+        'extra_work_pay': extra_work_pay,
+        'gross': gross,
+        'pf_emp': pf_emp,
+        'esi_emp': esi_emp,
+        'pt': pt,
+        'tds': tds,
+        'lop_deduction': lop_deduction,
+        'total_deductions': total_deductions,
+        'net_pay': net_pay,
+    }
+
+
+def queue_locked_regularization_adjustment(regularization):
+    record = regularization.attendance
+    source_run = PayrollRun.objects.filter(
+        month=record.date.month,
+        year=record.date.year,
+        status='locked',
+    ).first()
+    if not source_run:
+        return None
+
+    old_entry = PayrollEntry.objects.filter(
+        payroll_run=source_run,
+        employee=record.employee,
+    ).select_related('salary_structure').first()
+    if not old_entry or not old_entry.salary_structure:
+        return None
+
+    values = calculate_employee_payroll_values(
+        record.employee,
+        old_entry.salary_structure,
+        source_run.year,
+        source_run.month,
+    )
+    existing = PayrollCarryForwardAdjustment.objects.filter(
+        source_regularization=regularization,
+        status='pending',
+    ).first()
+    total_delta = ROUND2(values['net_pay'] - old_entry.net_pay)
+    already_queued = sum(
+        item.amount
+        for item in PayrollCarryForwardAdjustment.objects.filter(
+            employee=record.employee,
+            source_run=source_run,
+        ).exclude(pk=existing.pk if existing else None).exclude(status='ignored')
+    )
+    delta = ROUND2(total_delta - already_queued)
+    if delta == 0:
+        if existing:
+            existing.status = 'ignored'
+            existing.amount = Decimal('0')
+            existing.save(update_fields=['status', 'amount'])
+        return None
+
+    reason = (
+        f"Attendance regularization approved for {record.date} "
+        f"({record.shift_type} shift) after payroll {source_run.month}/{source_run.year} was locked. "
+        f"Old net {old_entry.net_pay}, corrected net {values['net_pay']}."
+    )
+    if existing:
+        existing.amount = delta
+        existing.reason = reason
+        existing.save(update_fields=['amount', 'reason'])
+        return existing
+
+    return PayrollCarryForwardAdjustment.objects.create(
+        employee=record.employee,
+        source_run=source_run,
+        source_regularization=regularization,
+        source_month=source_run.month,
+        source_year=source_run.year,
+        amount=delta,
+        reason=reason,
+    )
+
+
+def apply_pending_carry_forward_adjustments(entry):
+    pending = PayrollCarryForwardAdjustment.objects.filter(
+        employee=entry.employee,
+        status='pending',
+    ).exclude(
+        source_year__gt=entry.payroll_run.year,
+    ).exclude(
+        source_year=entry.payroll_run.year,
+        source_month__gte=entry.payroll_run.month,
+    )
+
+    changed_entry = False
+    for item in pending:
+        amount = ROUND2(item.amount)
+        if amount == 0:
+            item.status = 'ignored'
+            item.applied_entry = entry
+            item.applied_at = timezone.now()
+            item.save(update_fields=['status', 'applied_entry', 'applied_at'])
+            continue
+
+        if amount > 0:
+            adj_type = 'arrear'
+            adj_amount = amount
+            entry.gross = ROUND2(entry.gross + adj_amount)
+            entry.net_pay = ROUND2(entry.net_pay + adj_amount)
+            changed_entry = True
+        else:
+            adj_type = 'deduction'
+            adj_amount = abs(amount)
+            entry.total_deductions = ROUND2(entry.total_deductions + adj_amount)
+            entry.net_pay = max(ROUND2(entry.net_pay - adj_amount), Decimal('0'))
+            changed_entry = True
+
+        PayrollAdjustment.objects.create(
+            payroll_entry=entry,
+            type=adj_type,
+            amount=adj_amount,
+            reason=item.reason,
+            added_by=None,
+        )
+        item.status = 'applied'
+        item.applied_entry = entry
+        item.applied_at = timezone.now()
+        item.save(update_fields=['status', 'applied_entry', 'applied_at'])
+
+    if changed_entry:
+        entry.save(update_fields=['gross', 'total_deductions', 'net_pay'])
+
+
 def count_comp_off_leave_days(employee, year, month):
     start_of_month = date(year, month, 1)
     end_of_month = date(year, month, calendar.monthrange(year, month)[1])
@@ -148,7 +348,56 @@ def get_attendance_summary(employee, year, month):
         date__month=month
     )
 
-    record_map = {r.date: r for r in records}
+    try:
+        from attendance.views import _refresh_record_from_current_policy
+        for rec in records:
+            original = (
+                rec.shift_start_snapshot,
+                rec.shift_end_snapshot,
+                rec.grace_minutes_snapshot,
+                rec.standard_hours_snapshot,
+                rec.half_day_hours_snapshot,
+                rec.is_overnight_shift,
+                rec.check_in_at,
+                rec.check_out_at,
+                rec.hours_worked,
+                rec.ot_hours,
+                rec.status,
+            )
+            _refresh_record_from_current_policy(rec)
+            updated = (
+                rec.shift_start_snapshot,
+                rec.shift_end_snapshot,
+                rec.grace_minutes_snapshot,
+                rec.standard_hours_snapshot,
+                rec.half_day_hours_snapshot,
+                rec.is_overnight_shift,
+                rec.check_in_at,
+                rec.check_out_at,
+                rec.hours_worked,
+                rec.ot_hours,
+                rec.status,
+            )
+            if updated != original:
+                rec.save(update_fields=[
+                    'shift_start_snapshot',
+                    'shift_end_snapshot',
+                    'grace_minutes_snapshot',
+                    'standard_hours_snapshot',
+                    'half_day_hours_snapshot',
+                    'is_overnight_shift',
+                    'check_in_at',
+                    'check_out_at',
+                    'hours_worked',
+                    'ot_hours',
+                    'status',
+                ])
+    except Exception:
+        pass
+
+    record_map = {}
+    for r in records:
+        record_map.setdefault(r.date, []).append(r)
     from attendance.models import Holiday
     
     holiday_dates = set(
@@ -172,19 +421,21 @@ def get_attendance_summary(employee, year, month):
         d = date(year, month, day)
 
         if is_weekend(d):
-            rec = record_map.get(d)
-            if rec and rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day'):
-                extra_work_dates.append({
-                    'date': str(d),
-                    'type': 'weekend',
-                    'check_in': str(rec.check_in),
-                    'check_out': str(rec.check_out),
-                })
-                if rec.ot_hours:
-                    ot_hrs += Decimal(str(rec.ot_hours))
+            recs = record_map.get(d, [])
+            for rec in recs:
+                if rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day'):
+                    extra_work_dates.append({
+                        'date': str(d),
+                        'type': 'weekend',
+                        'shift_type': getattr(rec, 'shift_type', 'day'),
+                        'check_in': str(rec.check_in),
+                        'check_out': str(rec.check_out),
+                    })
+                    if rec.ot_hours:
+                        ot_hrs += Decimal(str(rec.ot_hours))
             continue
 
-        rec = record_map.get(d)
+        recs = record_map.get(d, [])
 
         # ── PUBLIC HOLIDAY — checked FIRST, before any record or auto-absent logic ──
         # A holiday is always a full paid present day for ALL employees.
@@ -195,52 +446,66 @@ def get_attendance_summary(employee, year, month):
         # OT is still counted if the employee chose to work on the holiday.
         if d in holiday_dates:
             present += Decimal('1')
-            if rec and rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day', 'holiday'):
-                extra_work_dates.append({
-                    'date': str(d),
-                    'type': 'holiday',
-                    'check_in': str(rec.check_in),
-                    'check_out': str(rec.check_out),
-                })
-                if rec.ot_hours:
-                    ot_hrs += Decimal(str(rec.ot_hours))
+            for rec in recs:
+                if rec.check_in and rec.check_out and str(rec.status).lower() in ('present', 'late', 'half_day', 'holiday'):
+                    extra_work_dates.append({
+                        'date': str(d),
+                        'type': 'holiday',
+                        'shift_type': getattr(rec, 'shift_type', 'day'),
+                        'check_in': str(rec.check_in),
+                        'check_out': str(rec.check_out),
+                    })
+                    if rec.ot_hours:
+                        ot_hrs += Decimal(str(rec.ot_hours))
             continue   # skip ALL record / auto-absent processing for this date
 
-        if rec:
-            status = str(rec.status).lower()
+        if recs:
+            day_present = Decimal('0')
+            day_lop = Decimal('0')
 
-            if status == 'present':
-                present += Decimal('1')
+            for rec in recs:
+                status = str(rec.status).lower()
 
-            elif status == 'late':
-                present += Decimal('1')
-                late_count += 1
+                if rec.check_in and not rec.check_out:
+                    day_present = max(day_present, Decimal('0.5'))
+                    day_lop = max(day_lop, Decimal('0.5'))
+                    continue
 
-            elif status == 'half_day':
-                if d in paid_full_dates or d in paid_half_dates:
-                    present += Decimal('1')
-                else:
-                    present += Decimal('0.5')
-                    lop += Decimal('0.5')
+                if status == 'present':
+                    day_present = max(day_present, Decimal('1'))
 
-            elif status in ['absent', 'auto_absent', 'lop', 'pending']:
-                if d in paid_full_dates or d in paid_half_dates:
-                    present += Decimal('1')
-                else:
-                    if auto_absent_enabled:
-                        lop += Decimal('1')
+                elif status == 'late':
+                    day_present = max(day_present, Decimal('1'))
+                    late_count += 1
 
-            elif status in ('leave', 'lop_leave'):
-                if d in lop_dates:
-                    lop += Decimal('1')
-                else:
-                    present += Decimal('1')
+                elif status == 'half_day':
+                    if d in paid_full_dates or d in paid_half_dates:
+                        day_present = max(day_present, Decimal('1'))
+                    else:
+                        day_present = max(day_present, Decimal('0.5'))
+                        day_lop = max(day_lop, Decimal('0.5'))
 
-            elif status == 'holiday':
-                present += Decimal('1')
+                elif status in ['absent', 'auto_absent', 'lop', 'pending']:
+                    if d in paid_full_dates or d in paid_half_dates:
+                        day_present = max(day_present, Decimal('1'))
+                    elif auto_absent_enabled and day_present == 0:
+                        day_lop = max(day_lop, Decimal('1'))
 
-            if rec.ot_hours:
-                ot_hrs += Decimal(str(rec.ot_hours))
+                elif status in ('leave', 'lop_leave'):
+                    if d in lop_dates:
+                        day_lop = max(day_lop, Decimal('1'))
+                    else:
+                        day_present = max(day_present, Decimal('1'))
+
+                elif status == 'holiday':
+                    day_present = max(day_present, Decimal('1'))
+
+                if rec.ot_hours:
+                    ot_hrs += Decimal(str(rec.ot_hours))
+
+            present += day_present
+            if day_present < Decimal('1'):
+                lop += day_lop
 
         else:
             # No attendance record, not a holiday, not a weekend
@@ -394,7 +659,7 @@ def process_payroll_run(payroll_run: PayrollRun):
         # PT: ALWAYS use pt_flat_amount from System Settings.
         # Changing PT in System Settings → takes effect on the very next payroll run.
         # Structure's stored pt is ignored — single source of truth is System Settings.
-        pt_full = calculate_pt()   # reads get_pt_flat_amount() live from System Settings
+        pt_full = calculate_pt(effective_gross)
         pt      = ROUND2(pt_full * ratio)
 
         # ── Step 5: TDS ───────────────────────────────────────────────
@@ -436,6 +701,7 @@ def process_payroll_run(payroll_run: PayrollRun):
             total_deductions  = total_deductions,
             net_pay           = net_pay,
         )
+        apply_pending_carry_forward_adjustments(entry)
         created.append(entry)
 
     return created, skipped

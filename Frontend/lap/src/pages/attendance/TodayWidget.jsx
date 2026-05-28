@@ -655,7 +655,7 @@ export default function TodayWidget() {
       {/* Regularize modal */}
       {showRegModal && (
         <RegularizeModal
-          record={checkedIn ? { id: null, date: todayDateStr, check_in: checkIn, check_out: checkOut, status: statusKey } : null}
+          record={today?.record || (checkedIn ? { id: null, date: todayDateStr, check_in: checkIn, check_out: checkOut, status: statusKey } : null)}
           date={todayDateStr}
           onClose={() => setShowRegModal(false)}
           onSaved={() => { setShowRegModal(false); load() }}

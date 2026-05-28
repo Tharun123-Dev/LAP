@@ -87,7 +87,7 @@ function SettingsPanel({ settings }) {
     { label:'ESI Employee',    value:`${settings.esi_employee_percent}% of Gross`,                         color:'#2563eb', icon:'🏥' },
     { label:'ESI Employer',    value:`${settings.esi_employer_percent}% of Gross`,                         color:'#2563eb', icon:'🏢' },
     { label:'ESI Threshold',   value:`≤ ₹${n(settings.esi_threshold).toLocaleString('en-IN')}`,           color:'#0891b2', icon:'📊' },
-    { label:'PT Slabs',        value:'Dynamic (from settings)',                                             color:'#0891b2', icon:'📋' },
+    { label:'PT Slabs',        value:`<= ${fmt(settings.pt_threshold_salary)}: ${fmt(settings.pt_below_threshold_amount)} / >: ${fmt(settings.pt_above_threshold_amount)}`, color:'#0891b2', icon:'📋' },
     { label:'TDS Contract',    value:`${settings.tds_flat_contract}% flat`,                                color:'#dc2626', icon:'📑' },
     { label:'OT Multiplier',   value:`${settings.overtime_multiplier}×`,                                   color:'#7c3aed', icon:'⏱' },
     { label:'Payroll Lock Day',value:`Day ${settings.payroll_lock_day} of month`,                          color:'#ea580c', icon:'🔒' },

@@ -28,13 +28,23 @@ const STATUS_COLOR = {
 const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
 /** Compute minutes late given check_in string (HH:MM) and shift_start string (HH:MM) + grace */
-function calcLateMinutes(checkIn, shiftStart, graceMinutes = 0) {
+function calcLateMinutes(checkIn, shiftStart, graceMinutes = 0, isOvernight = false) {
   if (!checkIn || !shiftStart) return 0
   const [sh, sm] = shiftStart.split(':').map(Number)
   const [ch, cm] = checkIn.split(':').map(Number)
   const shiftMins  = sh * 60 + sm + (graceMinutes || 0)
-  const checkInMin = ch * 60 + cm
+  let checkInMin = ch * 60 + cm
+  if (isOvernight && checkInMin < sh * 60 + sm) checkInMin += 24 * 60
   return Math.max(0, checkInMin - shiftMins)
+}
+
+function formatDurationFromHours(hours) {
+  const totalMinutes = Math.round((parseFloat(hours) || 0) * 60)
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  if (h && m) return `${h}h ${m}m`
+  if (h) return `${h}h`
+  return `${m}m`
 }
 
 export default function MonthlyView() {
@@ -103,7 +113,10 @@ export default function MonthlyView() {
   // Build lookups from API response
   const recordMap  = {}
   const holidayMap = {}
-  data?.records?.forEach((r) => { recordMap[r.date]  = r })
+  data?.records?.forEach((r) => {
+    if (!recordMap[r.date]) recordMap[r.date] = []
+    recordMap[r.date].push(r)
+  })
   data?.holidays?.forEach((h) => { holidayMap[h.date] = h.name })
 
   const firstDay  = new Date(year, month - 1, 1).getDay()
@@ -137,7 +150,7 @@ export default function MonthlyView() {
     { label: 'Late',       val: data.summary.late,                                     color: '#d97706' },
     { label: 'Half Day',   val: data.summary.half_day,                                 color: '#b45309' },
     { label: 'Total Hrs',  val: (data.summary.total_hours?.toFixed(1) || '0.0') + 'h', color: '#1d4ed8' },
-    { label: 'OT Hrs',     val: (data.summary.total_ot?.toFixed(1)   || '0.0') + 'h', color: '#7c3aed' },
+    { label: 'OT Hrs',     val: formatDurationFromHours(data.summary.total_ot || 0), color: '#7c3aed' },
   ] : []
 
   return (
@@ -198,14 +211,27 @@ export default function MonthlyView() {
               if (!day) return <div key={`e-${i}`} style={emptyCell} />
 
               const dateStr    = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-              const record     = recordMap[dateStr]
+              const recordsForDate = recordMap[dateStr] || []
+              const record = (
+                recordsForDate.find(r => r.status === 'late') ||
+                recordsForDate.find(r => r.status === 'half_day') ||
+                recordsForDate.find(r => r.status === 'pending') ||
+                recordsForDate.find(r => r.shift_type === 'night') ||
+                recordsForDate[0]
+              )
               const holidayName = holidayMap[dateStr] || record?.holiday_name
               const cellDate   = new Date(dateStr)
               const isWkndDay  = isWeekend(cellDate)
               const isToday    = dateStr === todayStr
               const isFuture   = dateStr > todayStr
 
-              const missingCheckout = !!(record?.check_in && !record?.check_out && dateStr !== todayStr)
+              const missingCheckout = recordsForDate.some(r => r?.check_in && !r?.check_out && dateStr !== todayStr)
+              const requestedShifts = new Set(
+                recordsForDate
+                  .filter(r => r?.shift_type && r?.regularization_status && r.regularization_status !== 'rejected')
+                  .map(r => r.shift_type)
+              )
+              const availableRequestShifts = ['day', 'night'].filter(shift => !requestedShifts.has(shift))
 
               let effectiveStatus = record?.status
               if (missingCheckout && effectiveStatus === 'present') effectiveStatus = 'half_day'
@@ -223,10 +249,13 @@ export default function MonthlyView() {
               // ── OT detection ──────────────────────────────────────────────
               const otHours   = parseFloat(record?.ot_hours || 0)
               const hasOT     = otHours > 0
+              const otLabel   = formatDurationFromHours(otHours)
 
               // ── Late minutes ──────────────────────────────────────────────
+              const recordShiftStart = record?.shift_start_snapshot || shiftStart
+              const recordGrace = record?.grace_minutes_snapshot ?? graceMinutes
               const lateMinutes = (effectiveStatus === 'late' && record?.check_in)
-                ? calcLateMinutes(record.check_in, shiftStart, graceMinutes)
+                ? calcLateMinutes(record.check_in, recordShiftStart, parseInt(recordGrace) || 0, record?.is_overnight_shift)
                 : 0
 
               let tooltipText = st?.title || ''
@@ -234,22 +263,41 @@ export default function MonthlyView() {
               if (leaveName)       tooltipText = `${isLop ? 'LOP: ' : ''}${leaveName}`
               if (missingCheckout) tooltipText = `⚠ Missing checkout — auto half-day: ${dateStr}`
               if (lateMinutes > 0) tooltipText += ` (${lateMinutes}m late)`
-              if (hasOT)           tooltipText += ` · OT: ${otHours.toFixed(1)}h`
+              if (hasOT)           tooltipText += ` · OT: ${otLabel}`
 
               const canRegularize = !!(
-                record &&
                 !isWkndDay &&
                 !holidayName &&
                 !isFuture &&
-                (effectiveStatus === 'pending' || effectiveStatus === 'absent') &&
-                !record.leave_name
+                !record?.leave_name &&
+                availableRequestShifts.length > 0 &&
+                (
+                  !record ||
+                  effectiveStatus === 'pending' ||
+                  effectiveStatus === 'absent' ||
+                  requestedShifts.size > 0
+                )
               )
+
+              const openRegularize = () => {
+                if (!canRegularize) return
+                const shift = availableRequestShifts[0]
+                const targetRecord = recordsForDate.find(r => r.shift_type === shift && !r.regularization_status)
+                setSelRecord(targetRecord || {
+                  id: null,
+                  date: dateStr,
+                  check_in: '',
+                  check_out: '',
+                  status: 'pending',
+                  shift_type: shift,
+                })
+              }
 
               return (
                 <div
                   key={day}
                   title={tooltipText}
-                  onClick={() => canRegularize && setSelRecord(record)}
+                  onClick={openRegularize}
                   style={{
                     padding: '6px 8px', minHeight: '76px',
                     borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9',
@@ -290,7 +338,7 @@ export default function MonthlyView() {
                     {/* ── OT BADGE (NEW) ── show when ot_hours > 0 */}
                     {hasOT && !isFuture && (
                       <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd8fe' }}>
-                        OT {otHours.toFixed(1)}h
+                        OT {otLabel}
                       </span>
                     )}
                   </div>
@@ -308,17 +356,22 @@ export default function MonthlyView() {
                     </p>
                   )}
 
-                  {record?.check_in && (
-                    <p style={{ margin: '2px 0 0', fontSize: '9px', color: missingCheckout ? '#dc2626' : '#888', fontWeight: missingCheckout ? 600 : 400 }}>
-                      {record.check_in}{record.check_out ? ` → ${record.check_out}` : isToday ? ' → ?' : ' → ⚠'}
-                    </p>
-                  )}
+                  {recordsForDate.map((row) => (
+                    row?.check_in && (
+                      <p key={`${row.id || row.shift_type}-${row.check_in}`} style={{ margin: '2px 0 0', fontSize: '9px', color: (!row.check_out && dateStr !== todayStr) ? '#dc2626' : '#888', fontWeight: (!row.check_out && dateStr !== todayStr) ? 600 : 400 }}>
+                        {row.shift_type === 'night' ? 'night ' : ''}
+                        {row.check_in}{row.check_out ? ` → ${row.check_out}` : isToday ? ' → ?' : ' → ⚠'}
+                      </p>
+                    )
+                  ))}
 
                   {missingCheckout && (
                     <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#ea580c', fontWeight: 600 }}>no checkout</p>
                   )}
                   {canRegularize && (
-                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>tap to request</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '8px', color: '#dc2626' }}>
+                      tap request {availableRequestShifts.join('/')}
+                    </p>
                   )}
                 </div>
               )

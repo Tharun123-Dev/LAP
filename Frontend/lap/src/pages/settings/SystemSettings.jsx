@@ -55,6 +55,9 @@ const KEY_IMPACT = {
   weekend_days:               ['📅 Calendar week-off cells', '💰 Payroll LOP days', '🌴 Apply Leave form'],
   work_start_time:            ['📅 Late marking'],
   work_end_time:              ['📅 OT calculation'],
+  night_shift_enabled:        ['📅 Night shift attendance', '💰 Payroll present/LOP'],
+  night_shift_start_time:     ['📅 Night check-in window', '📅 Late marking'],
+  night_shift_end_time:       ['📅 Next-day checkout', '📅 OT calculation'],
   work_hours_per_day:         ['💰 OT pay rate'],
   grace_period_minutes:       ['📅 Late vs Present status'],
   half_day_hours:             ['📅 Half Day marking', '💰 LOP 0.5 day'],
@@ -89,6 +92,9 @@ const KEY_IMPACT = {
   payroll_lock_day:           ['💰 Payroll Runs warning'],
   tds_flat_percent_contract:  ['💰 TDS for contract employees'],
   pt_flat_amount:             ['💰 PT deduction in payslip'],
+  pt_threshold_salary:        ['PT slab cutoff', 'Salary Config preview'],
+  pt_below_threshold_amount:  ['PT below cutoff', 'Payslip deduction'],
+  pt_above_threshold_amount:  ['PT above cutoff', 'Payslip deduction'],
   company_name:               ['🧾 Payslip header', '📧 Email subject'],
   fiscal_year_start_month:    ['💰 Payroll year', '🌴 Fiscal leave year'],
   probation_period_months:    ['🌴 EL eligibility for new employees'],
@@ -113,6 +119,7 @@ const HIDDEN_KEYS = [
   'sl_advance_notice_days',
   'sl_is_paid',
   'pt_slab_json',
+  'pt_flat_amount',
   'currency',
   'fiscal_year_start_month',
   'cl_advance_notice_days'
@@ -236,7 +243,7 @@ export default function SystemSettings() {
     return (
       <input
         value={value}
-        type={['integer', 'decimal'].includes(setting.value_type) ? 'number' : 'text'}
+        type={setting.value_type === 'time' ? 'time' : ['integer', 'decimal'].includes(setting.value_type) ? 'number' : 'text'}
         step={setting.value_type === 'decimal' ? '0.01' : '1'}
         onChange={e => canEdit && handleChange(setting.key, e.target.value)}
         disabled={!canEdit}

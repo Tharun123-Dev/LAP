@@ -29,22 +29,61 @@ def _parse_bool(val) -> bool:
 
 # ── ATTENDANCE ────────────────────────────────────────────────────────────────
 
-def get_shift_start() -> time:
-    raw = _get('work_start_time', '09:00')
+def _parse_time_setting(raw, fallback: time) -> time:
     try:
-        h, m = str(raw).strip().split(':')
-        return time(int(h), int(m))
+        parts = str(raw).strip().split(':')
+        h = int(parts[0])
+        m = int(parts[1]) if len(parts) > 1 else 0
+        s = int(float(parts[2])) if len(parts) > 2 else 0
+        return time(h, m, s)
     except Exception:
-        return time(9, 0)
+        return fallback
+
+
+def get_shift_start() -> time:
+    return _parse_time_setting(_get('work_start_time', '09:00'), time(9, 0))
 
 
 def get_shift_end() -> time:
-    raw = _get('work_end_time', '18:00')
-    try:
-        h, m = str(raw).strip().split(':')
-        return time(int(h), int(m))
-    except Exception:
-        return time(18, 0)
+    return _parse_time_setting(_get('work_end_time', '18:00'), time(18, 0))
+
+
+def get_night_shift_enabled() -> bool:
+    return _parse_bool(_get('night_shift_enabled', False))
+
+
+def get_night_shift_start() -> time:
+    return _parse_time_setting(_get('night_shift_start_time', '22:00'), time(22, 0))
+
+
+def get_night_shift_end() -> time:
+    return _parse_time_setting(_get('night_shift_end_time', '06:00'), time(6, 0))
+
+
+def is_time_in_shift(clock: time, start: time, end: time) -> bool:
+    if start <= end:
+        return start <= clock < end
+    return clock >= start or clock < end
+
+
+def get_active_shift_for_time(clock: time) -> dict:
+    night_start = get_night_shift_start()
+    night_end = get_night_shift_end()
+    if get_night_shift_enabled() and is_time_in_shift(clock, night_start, night_end):
+        return {
+            'type': 'night',
+            'start': night_start,
+            'end': night_end,
+            'is_overnight': night_end <= night_start,
+        }
+    day_start = get_shift_start()
+    day_end = get_shift_end()
+    return {
+        'type': 'day',
+        'start': day_start,
+        'end': day_end,
+        'is_overnight': day_end <= day_start,
+    }
 
 
 def get_grace_minutes() -> int:
@@ -165,8 +204,8 @@ def get_esi_threshold() -> Decimal:
 
 
 def get_payroll_lock_day() -> int:
-    """Day of month after which payroll run is allowed. Default 25."""
-    return int(_get('payroll_lock_day', 25))
+    """Payroll is available on day 1 of the next month for the previous month."""
+    return 1
 
 
 def get_tds_flat_contract() -> Decimal:
@@ -176,21 +215,49 @@ def get_tds_flat_contract() -> Decimal:
 
 def get_pt_flat_amount() -> Decimal:
     """
-    Professional Tax flat monthly amount (₹).
-    Enter a plain number in System Settings e.g. 200 → deducts ₹200/month.
-    Enter 0 → no PT deduction.
-    Default 200.
+    Legacy flat Professional Tax amount.
+    Kept as a fallback so existing settings/data continue to work.
     """
     return Decimal(str(_get('pt_flat_amount', 200)))
 
 
+def get_pt_threshold_salary() -> Decimal:
+    """Gross salary threshold for Professional Tax slabs. Default 15000."""
+    return Decimal(str(_get('pt_threshold_salary', 15000)))
+
+
+def get_pt_below_threshold_amount() -> Decimal:
+    """PT amount when monthly gross is below/equal to threshold. Default 0."""
+    return Decimal(str(_get('pt_below_threshold_amount', 0)))
+
+
+def get_pt_above_threshold_amount() -> Decimal:
+    """PT amount when monthly gross is above threshold. Falls back to legacy flat PT."""
+    return Decimal(str(_get('pt_above_threshold_amount', get_pt_flat_amount())))
+
+
+def calculate_professional_tax(gross) -> Decimal:
+    """
+    Professional Tax based on monthly gross salary.
+    If gross <= pt_threshold_salary, use pt_below_threshold_amount.
+    If gross > threshold, use pt_above_threshold_amount.
+    """
+    gross = Decimal(str(gross or 0))
+    threshold = get_pt_threshold_salary()
+    if gross <= threshold:
+        return get_pt_below_threshold_amount()
+    return get_pt_above_threshold_amount()
+
+
 def get_pt_slabs() -> list:
     """
-    Kept for backward compatibility only.
-    PT is now a flat amount via get_pt_flat_amount().
+    Backward-compatible representation for clients that still expect slabs.
     """
-    flat = float(get_pt_flat_amount())
-    return [{'upto': 99999999, 'pt': flat}]
+    threshold = float(get_pt_threshold_salary())
+    return [
+        {'upto': threshold, 'pt': float(get_pt_below_threshold_amount())},
+        {'above': threshold, 'pt': float(get_pt_above_threshold_amount())},
+    ]
 
 
 # ── LEAVE ─────────────────────────────────────────────────────────────────────
@@ -233,8 +300,8 @@ def get_default_other_allowance() -> Decimal:
 
 
 def get_default_pt() -> Decimal:
-    """Default professional tax per month. Default 200."""
-    return Decimal(str(_get('default_pt_amount', 200)))
+    """Default professional tax per month. Falls back to gross-based PT above threshold."""
+    return Decimal(str(_get('default_pt_amount', get_pt_above_threshold_amount())))
 
 
 def get_working_days_per_month() -> int:

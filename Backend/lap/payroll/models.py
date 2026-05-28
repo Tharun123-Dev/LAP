@@ -297,3 +297,38 @@ class PayrollAdjustment(models.Model):
 
     def __str__(self):
         return f"{self.type} | {self.amount} | {self.payroll_entry.employee.username}"
+
+
+class PayrollCarryForwardAdjustment(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('applied', 'Applied'),
+        ('ignored', 'Ignored'),
+    ]
+
+    employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payroll_carry_forward_adjustments')
+    source_run = models.ForeignKey(
+        PayrollRun, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='carry_forward_sources'
+    )
+    source_regularization = models.ForeignKey(
+        'attendance.AttendanceRegularization', null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='payroll_corrections'
+    )
+    source_month = models.IntegerField()
+    source_year = models.IntegerField()
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    applied_entry = models.ForeignKey(
+        PayrollEntry, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='applied_carry_forward_adjustments'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.employee.username} | {self.source_month}/{self.source_year} | {self.amount} | {self.status}"

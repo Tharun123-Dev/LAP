@@ -13,5 +13,5 @@ class NotificationSerializer(serializers.ModelSerializer):
 class SystemSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model  = SystemSetting
-        fields = ['id', 'key', 'value', 'label', 'category', 'description', 'updated_at']
-        read_only_fields = ['id', 'key', 'label', 'category', 'description', 'updated_at']
+        fields = ['id', 'key', 'value', 'value_type', 'label', 'category', 'description', 'updated_at']
+        read_only_fields = ['id', 'key', 'value_type', 'label', 'category', 'description', 'updated_at']

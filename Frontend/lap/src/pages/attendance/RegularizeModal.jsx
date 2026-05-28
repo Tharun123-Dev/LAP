@@ -12,6 +12,7 @@ export default function RegularizeModal({ record, date, onClose, onSaved }) {
     reason:             '',
     requested_checkin:  record?.check_in  || '',
     requested_checkout: record?.check_out || '',
+    shift_type:         record?.shift_type || 'day',
   })
   const [saving, setSaving] = useState(false)
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }))
@@ -20,6 +21,7 @@ export default function RegularizeModal({ record, date, onClose, onSaved }) {
   const currentCI    = record?.check_in  || '—'
   const currentCO    = record?.check_out || '—'
   const currentStatus = record?.status   || 'absent'
+  const currentShift  = record?.shift_type || form.shift_type
 
   const handleSubmit = async () => {
     if (!form.reason.trim()) { toast.error('Reason is required'); return }
@@ -30,13 +32,14 @@ export default function RegularizeModal({ record, date, onClose, onSaved }) {
         reason:             form.reason,
         requested_checkin:  form.requested_checkin  || undefined,
         requested_checkout: form.requested_checkout || undefined,
+        shift_type:         form.shift_type,
       }
 
-      // Attach either by record ID or by date
-      if (record?.id) {
+      // Attach to the existing shift, or create the other shift for the same date.
+      if (record?.id && form.shift_type === record?.shift_type) {
         payload.attendance_id = record.id
       } else {
-        payload.date = date
+        payload.date = displayDate
       }
 
       await applyRegularizationApi(payload)
@@ -59,6 +62,12 @@ export default function RegularizeModal({ record, date, onClose, onSaved }) {
             Current: {currentCI} → {currentCO}
             <span style={{
               marginLeft: '8px', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
+              background: '#e0f2fe', color: '#0369a1', textTransform: 'capitalize'
+            }}>
+              {currentShift} shift
+            </span>
+            <span style={{
+              marginLeft: '8px', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
               background: '#fee2e2', color: '#991b1b', textTransform: 'capitalize'
             }}>
               {currentStatus.replace('_', ' ')}
@@ -71,7 +80,17 @@ export default function RegularizeModal({ record, date, onClose, onSaved }) {
           )}
         </div>
 
-        <label style={lbl}>Requested Check-in</label>
+        <label style={lbl}>Shift</label>
+        <select
+          value={form.shift_type}
+          onChange={set('shift_type')}
+          style={inp}
+        >
+          <option value="day">Day Shift</option>
+          <option value="night">Night Shift</option>
+        </select>
+
+        <label style={{ ...lbl, marginTop: '12px' }}>Requested Check-in</label>
         <input
           type="time"
           value={form.requested_checkin}

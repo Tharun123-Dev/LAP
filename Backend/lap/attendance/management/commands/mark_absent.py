@@ -24,6 +24,7 @@ FIX: Weekend detection now uses settings_helper.is_weekend() instead of
 
 from datetime import date, timedelta
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from accounts.models import User
 from attendance.models import AttendanceRecord, Holiday
@@ -111,6 +112,16 @@ class Command(BaseCommand):
             ).values_list('employee_id', flat=True)
         )
 
+        open_shift_employee_ids = set()
+        for rec in AttendanceRecord.objects.filter(
+            check_in__isnull=False,
+            check_out__isnull=True,
+            date__lte=today,
+        ).select_related('employee'):
+            expected_end = rec.expected_shift_end_at()
+            if expected_end and timezone.localtime(timezone.now()) <= expected_end:
+                open_shift_employee_ids.add(rec.employee_id)
+
         # ─────────────────────────────────────────────
         # JOB 1
         # Missing checkout yesterday → FULL ABSENT
@@ -129,6 +140,15 @@ class Command(BaseCommand):
             emp = rec.employee
 
             if not emp.is_active:
+                continue
+
+            expected_end = rec.expected_shift_end_at()
+            if expected_end and timezone.localtime(timezone.now()) <= expected_end:
+                self.stdout.write(
+                    f'  [SKIP - OPEN NIGHT SHIFT] '
+                    f'{emp.get_full_name() or emp.username} '
+                    f'expected checkout after {timezone.localtime(expected_end).strftime("%Y-%m-%d %H:%M")}'
+                )
                 continue
 
             rec.status = 'pending'
@@ -181,9 +201,17 @@ class Command(BaseCommand):
             if emp.id in already_marked_today:
                 continue
 
+            if emp.id in open_shift_employee_ids:
+                self.stdout.write(
+                    f'  [SKIP - OPEN SHIFT] '
+                    f'{emp.get_full_name() or emp.username}'
+                )
+                continue
+
             AttendanceRecord.objects.update_or_create(
                 employee=emp,
                 date=today,
+                shift_type='day',
                 defaults={
                     'status': 'pending',
                     'hours_worked': 0,

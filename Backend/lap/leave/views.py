@@ -22,6 +22,25 @@ def _is_comp_off_type(leave_type):
     return (leave_type.code or '').upper() in COMP_OFF_CODES
 
 
+def _blocked_leave_dates(start, end):
+    from attendance.models import Holiday
+    from attendance.settings_helper import is_weekend
+
+    holiday_map = {
+        h.date: h.name
+        for h in Holiday.objects.filter(date__gte=start, date__lte=end)
+    }
+    blocked = []
+    cur = start
+    while cur <= end:
+        if cur in holiday_map:
+            blocked.append({'date': cur, 'type': 'holiday', 'label': holiday_map[cur]})
+        elif is_weekend(cur):
+            blocked.append({'date': cur, 'type': 'week off', 'label': 'Week off'})
+        cur += timedelta(days=1)
+    return blocked
+
+
 def _comp_off_work_summary(employee, leave=None):
     from attendance.models import AttendanceRecord, Holiday
     from attendance.settings_helper import is_weekend
@@ -280,6 +299,36 @@ class ApplyLeaveView(APIView):
             return Response({
                 'error': 'Leave type not found'
             }, status=404)
+
+        blocked_dates = _blocked_leave_dates(start, end)
+        if blocked_dates:
+            first = blocked_dates[0]
+            payload = {
+                'blocked_dates': [
+                    {
+                        'date': str(item['date']),
+                        'type': item['type'],
+                        'label': item['label'],
+                    }
+                    for item in blocked_dates
+                ],
+            }
+            if len(blocked_dates) == 1:
+                payload['error'] = (
+                    f"Cannot apply leave on {first['date']}: "
+                    f"this day is {first['label']}."
+                )
+            else:
+                details = ', '.join(
+                    f"{item['date']} ({item['label']})"
+                    for item in blocked_dates[:5]
+                )
+                more = f" and {len(blocked_dates) - 5} more" if len(blocked_dates) > 5 else ''
+                payload['error'] = (
+                    'Cannot apply leave because the selected range includes '
+                    f'week off/holiday date(s): {details}{more}.'
+                )
+            return Response(payload, status=400)
 
         # ─────────────────────────────────────────────
         # FULLY DYNAMIC NOTICE PERIOD

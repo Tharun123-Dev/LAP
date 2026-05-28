@@ -61,17 +61,30 @@ class AttendanceRecord(models.Model):
         ('leave',    'On Leave'),
         ('pending',  'Pending Correction'),
     ]
+    SHIFT_CHOICES = [
+        ('day', 'Day Shift'),
+        ('night', 'Night Shift'),
+    ]
 
     employee     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='attendance_records')
     date         = models.DateField()
+    shift_type   = models.CharField(max_length=10, choices=SHIFT_CHOICES, default='day')
     check_in     = models.TimeField(null=True, blank=True)
     check_out    = models.TimeField(null=True, blank=True)
+    check_in_at  = models.DateTimeField(null=True, blank=True)
+    check_out_at = models.DateTimeField(null=True, blank=True)
     hours_worked = models.DecimalField(max_digits=4, decimal_places=2, default=0)
     status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default='absent')
     is_wfh       = models.BooleanField(default=False)
     ot_hours     = models.DecimalField(max_digits=4, decimal_places=2, default=0)
     note         = models.TextField(blank=True)
     is_locked    = models.BooleanField(default=False)
+    shift_start_snapshot = models.TimeField(null=True, blank=True)
+    shift_end_snapshot = models.TimeField(null=True, blank=True)
+    grace_minutes_snapshot = models.PositiveIntegerField(null=True, blank=True)
+    standard_hours_snapshot = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    half_day_hours_snapshot = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
+    is_overnight_shift = models.BooleanField(default=False)
 
     # ── Location tracking ─────────────────────────────────────────────────────
     checkin_latitude   = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
@@ -87,20 +100,38 @@ class AttendanceRecord(models.Model):
     updated_at   = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ['employee', 'date']
+        unique_together = ['employee', 'date', 'shift_type']
         ordering        = ['-date']
 
     def __str__(self):
-        return f"{self.employee.username} | {self.date} | {self.status}"
+        return f"{self.employee.username} | {self.date} | {self.shift_type} | {self.status}"
 
     def calculate_hours(self):
         if not self.check_in or not self.check_out:
             return 0
-        from datetime import datetime, date
+        if self.check_in_at and self.check_out_at:
+            diff = (self.check_out_at - self.check_in_at).total_seconds() / 3600
+            return round(max(diff, 0), 2)
+        from datetime import datetime, date, timedelta
         ci = datetime.combine(date.today(), self.check_in)
         co = datetime.combine(date.today(), self.check_out)
+        if co <= ci:
+            co += timedelta(days=1)
         diff = (co - ci).total_seconds() / 3600
         return round(max(diff, 0), 2)
+
+    def expected_shift_end_at(self):
+        if not self.check_in:
+            return None
+        from datetime import datetime, timedelta
+        from django.utils import timezone
+        shift_end = self.shift_end_snapshot or self.check_in
+        naive_end = datetime.combine(self.date, shift_end)
+        if self.is_overnight_shift or (self.shift_start_snapshot and shift_end <= self.shift_start_snapshot):
+            naive_end += timedelta(days=1)
+        if timezone.is_naive(naive_end):
+            return timezone.make_aware(naive_end, timezone.get_current_timezone())
+        return naive_end
 
 
 # ── ATTENDANCE REGULARIZATION ─────────────────────────────────────────────────

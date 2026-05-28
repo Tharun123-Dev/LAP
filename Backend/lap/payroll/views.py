@@ -21,10 +21,12 @@ from attendance.settings_helper import (
     get_da_percent, get_pf_employee_percent, get_pf_employer_percent,
     get_esi_employee_percent, get_esi_employer_percent, get_esi_threshold,
     get_payroll_lock_day, get_tds_flat_contract, get_pt_flat_amount,
+    get_pt_threshold_salary, get_pt_below_threshold_amount,
+    get_pt_above_threshold_amount, calculate_professional_tax,
     get_overtime_multiplier,
     get_company_name, get_currency, get_fiscal_year_start_month, get_probation_months,
     get_default_transport, get_default_medical, get_default_other_allowance,
-    get_default_pt, get_working_days_per_month, get_pt_flat_amount,
+    get_default_pt, get_working_days_per_month,
 )
 
 
@@ -65,6 +67,9 @@ class PayrollSettingsDefaultsView(APIView):
             'tds_flat_contract':        float(get_tds_flat_contract()),
             'overtime_multiplier':      float(get_overtime_multiplier()),
             'pt_flat_amount':            float(get_pt_flat_amount()),
+            'pt_threshold_salary':       float(get_pt_threshold_salary()),
+            'pt_below_threshold_amount': float(get_pt_below_threshold_amount()),
+            'pt_above_threshold_amount': float(get_pt_above_threshold_amount()),
             # Fixed allowance defaults — fully from System Settings
             'default_transport':        float(get_default_transport()),
             'default_medical':          float(get_default_medical()),
@@ -102,14 +107,13 @@ def _serialize_structure(structure):
     transport = float(structure.transport)
     medical   = float(structure.medical)
     other     = float(structure.other_allowance)
-    # PT: always show live system settings value (not stored structure value)
-    pt        = float(get_pt_flat_amount())
-
     basic     = round(monthly * basic_pct, 2)
     hra       = round(basic   * hra_pct, 2)
     da        = round(basic   * da_pct, 2)
     special   = round(max(monthly - basic - hra - da - transport - medical - other, 0), 2)
     gross     = round(basic + hra + da + special + transport + medical + other, 2)
+    # PT: always show live gross-based system settings value.
+    pt        = float(calculate_professional_tax(gross))
 
     # Always use 21000 as ESI threshold minimum — system setting may be misconfigured
     raw_threshold = float(get_esi_threshold())
@@ -237,6 +241,8 @@ class CreateSalaryStructureView(APIView):
             esi_er = (basic + hra + da + tr + med + oth) * get_esi_employer_percent() / Decimal('100')
 
             gross_components = basic + hra + da + tr + med + oth
+            preview_gross = monthly_ctc
+            data['pt'] = float(calculate_professional_tax(preview_gross))
             total_ctc_month  = gross_components + pf_er + esi_er
             ctc_diff = abs(ctc / Decimal('12') - total_ctc_month)
             ctc_warning = None
@@ -428,6 +434,12 @@ class UpdatePayrollEntryView(APIView):
             entry.special_allowance + entry.transport +
             entry.medical + entry.other_allowance + entry.ot_pay
         )
+        ratio = (
+            Decimal(str(entry.present_days)) / Decimal(str(entry.working_days))
+            if entry.working_days else Decimal('0')
+        )
+        effective_gross = max(entry.gross - entry.lop_deduction, Decimal('0'))
+        entry.pt = (calculate_professional_tax(effective_gross) * ratio).quantize(Decimal('0.01'))
         entry.total_deductions = (
             entry.pf_employee + entry.esi_employee +
             entry.pt + entry.tds + entry.lop_deduction
