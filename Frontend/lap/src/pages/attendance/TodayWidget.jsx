@@ -453,6 +453,7 @@ export default function TodayWidget() {
   const checkOut   = formatTime(today?.record?.check_out || today?.check_out || null)
 
   const hoursWorked= today?.record?.hours_worked || today?.hours_worked || 0
+  const otHours    = parseFloat(today?.record?.ot_hours ?? today?.ot_hours ?? 0)
   const isWfhDone  = today?.record?.is_wfh ?? today?.is_wfh ?? false
   const ciDist     = today?.record?.checkin_distance_m  ?? today?.checkin_distance_m  ?? null
   const coDist     = today?.record?.checkout_distance_m ?? today?.checkout_distance_m ?? null
@@ -610,9 +611,9 @@ export default function TodayWidget() {
               <p style={{ margin: 0, color: '#166534', fontWeight: 600, fontSize: isMobile ? '13px' : '15px' }}>
                 ✅ Day complete — {hoursWorked}h worked
               </p>
-              {parseFloat(hoursWorked || 0) > 8 && (
+              {otHours > 0 && (
                 <p style={{ margin: '6px 0 0', color: '#0369a1', fontSize: '13px' }}>
-                  🕐 {(parseFloat(hoursWorked) - 8).toFixed(2)}h overtime
+                  🕐 {otHours.toFixed(2)}h overtime
                 </p>
               )}
               <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>

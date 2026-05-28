@@ -28,6 +28,7 @@ from .serializers import (
 )
 from .settings_helper import (
     get_shift_start,
+    get_shift_end,
     get_grace_minutes,
     get_standard_hours,
     get_half_day_hours,
@@ -65,6 +66,29 @@ def _get_status(check_in, check_out, hours_worked):
     if ci > grace_cutoff:
         return 'late'
     return 'present'
+
+
+def _calculate_ot_hours(check_in, check_out):
+    if not check_in or not check_out:
+        return Decimal('0')
+
+    shift_end = get_shift_end()
+    shift_start = get_shift_start()
+    grace_minutes = get_grace_minutes()
+    ref_date = date(2000, 1, 1)
+    ci = datetime.combine(ref_date, check_in)
+    co = datetime.combine(ref_date, check_out)
+    start = datetime.combine(ref_date, shift_start)
+    end = datetime.combine(ref_date, shift_end)
+    grace_cutoff = start + timedelta(minutes=grace_minutes)
+    late_minutes = max((ci - grace_cutoff).total_seconds() / 60, 0)
+    ot_start = end + timedelta(minutes=late_minutes)
+
+    if co <= ot_start:
+        return Decimal('0')
+
+    hours = (co - ot_start).total_seconds() / 3600
+    return Decimal(str(round(hours, 2)))
 
 
 def _validate_location(lat, lon):
@@ -189,12 +213,7 @@ class CheckOutView(APIView):
         record.check_out    = now_time
         record.hours_worked = Decimal(str(record.calculate_hours()))
 
-        from attendance.settings_helper import get_standard_hours
-        standard_hours = Decimal(str(get_standard_hours()))
-        if record.hours_worked > standard_hours:
-            record.ot_hours = record.hours_worked - standard_hours
-        else:
-            record.ot_hours = Decimal('0')
+        record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out)
 
         if lat is not None and not record.is_wfh:
             record.checkout_latitude   = lat
@@ -377,14 +396,29 @@ class ApplyRegularizationView(APIView):
 
     def post(self, request):
         attendance_id      = request.data.get('attendance_id')
+        request_date       = request.data.get('date')
         reason             = request.data.get('reason', '')
         requested_checkin  = request.data.get('requested_checkin')
         requested_checkout = request.data.get('requested_checkout')
 
-        try:
-            record = AttendanceRecord.objects.get(id=attendance_id, employee=request.user)
-        except AttendanceRecord.DoesNotExist:
-            return Response({'error': 'Attendance record not found'}, status=status.HTTP_404_NOT_FOUND)
+        if attendance_id:
+            try:
+                record = AttendanceRecord.objects.get(id=attendance_id, employee=request.user)
+            except AttendanceRecord.DoesNotExist:
+                return Response({'error': 'Attendance record not found'}, status=status.HTTP_404_NOT_FOUND)
+        elif request_date:
+            try:
+                parsed_date = date.fromisoformat(request_date)
+            except ValueError:
+                return Response({'error': 'Invalid date format. Use YYYY-MM-DD'}, status=status.HTTP_400_BAD_REQUEST)
+
+            record, _ = AttendanceRecord.objects.get_or_create(
+                employee=request.user,
+                date=parsed_date,
+                defaults={'status': 'absent'},
+            )
+        else:
+            return Response({'error': 'attendance_id or date is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         if hasattr(record, 'regularization'):
             return Response({'error': 'Regularisation already submitted for this date'}, status=status.HTTP_400_BAD_REQUEST)
@@ -447,6 +481,7 @@ class ApproveRegularizationView(APIView):
                 record.check_out = reg.requested_checkout
             if record.check_in and record.check_out:
                 record.hours_worked = Decimal(str(record.calculate_hours()))
+                record.ot_hours = _calculate_ot_hours(record.check_in, record.check_out)
                 record.status = _get_status(record.check_in, record.check_out, record.hours_worked)
             record.save()
 

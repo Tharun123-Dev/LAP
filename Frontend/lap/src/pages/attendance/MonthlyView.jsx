@@ -1,11 +1,11 @@
 // src/pages/attendance/MonthlyView.jsx
-// ── REPLACEMENT FILE ──
-// Replace: Frontend/lap/src/pages/attendance/MonthlyView.jsx
-// Changes:
-//  1. Holiday days (status='holiday') rendered as blue "PH" badge in calendar.
-//  2. Summary "Present" pill now includes holiday count (backend already sends this).
-//  3. Holiday pill in summary row shows count of public holidays.
-//  4. All other logic (weekend detection, regularize, leave, OT) unchanged.
+// ── FIXED FILE ──
+// Fixes:
+//  1. OT badge shown in calendar cell when ot_hours > 0
+//  2. Late minutes shown in cell (how many minutes late)
+//  3. Policy data (shift_start, grace, late_cutoff) fetched from API response
+//  4. Late count shown in summary with policy note
+//  5. All existing logic preserved
 
 import { useEffect, useState } from 'react'
 import { getMyAttendanceApi } from '../../api/services/attendance'
@@ -26,17 +26,28 @@ const STATUS_COLOR = {
 
 const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
 
+/** Compute minutes late given check_in string (HH:MM) and shift_start string (HH:MM) + grace */
+function calcLateMinutes(checkIn, shiftStart, graceMinutes = 0) {
+  if (!checkIn || !shiftStart) return 0
+  const [sh, sm] = shiftStart.split(':').map(Number)
+  const [ch, cm] = checkIn.split(':').map(Number)
+  const shiftMins  = sh * 60 + sm + (graceMinutes || 0)
+  const checkInMin = ch * 60 + cm
+  return Math.max(0, checkInMin - shiftMins)
+}
+
 export default function MonthlyView() {
   const now = new Date()
-  const [month,            setMonth]       = useState(now.getMonth() + 1)
-  const [year,             setYear]        = useState(now.getFullYear())
-  const [data,             setData]        = useState(null)
-  const [loading,          setLoading]     = useState(false)
-  const [selRecord,        setSelRecord]   = useState(null)
-  const [weekendDays,      setWeekendDays] = useState(['saturday', 'sunday'])
-  const [workDaysPerWeek,  setWorkDays]    = useState(5)
-  const [shiftStart,       setShiftStart]  = useState('09:00')
-  
+  const [month,           setMonth]       = useState(now.getMonth() + 1)
+  const [year,            setYear]        = useState(now.getFullYear())
+  const [data,            setData]        = useState(null)
+  const [loading,         setLoading]     = useState(false)
+  const [selRecord,       setSelRecord]   = useState(null)
+  const [weekendDays,     setWeekendDays] = useState(['saturday', 'sunday'])
+  const [workDaysPerWeek, setWorkDays]    = useState(5)
+  const [shiftStart,      setShiftStart]  = useState('09:00')
+  const [graceMinutes,    setGraceMinutes]= useState(15)
+
   // Load weekend / shift settings once
   useEffect(() => {
     systemSettingsService.getAll().then((res) => {
@@ -51,6 +62,9 @@ export default function MonthlyView() {
 
       const wst = find('work_start_time')
       if (wst) setShiftStart(wst.value)
+
+      const gpm = find('grace_period_minutes')
+      if (gpm) setGraceMinutes(parseInt(gpm.value) || 15)
     }).catch(() => {})
   }, [])
 
@@ -61,6 +75,12 @@ export default function MonthlyView() {
     try {
       const r = await getMyAttendanceApi(month, year)
       setData(r.data)
+      // Also update shift/grace from the policy field in API response
+      if (r.data?.policy) {
+        const p = r.data.policy
+        if (p.shift_start)   setShiftStart(p.shift_start)
+        if (p.grace_minutes != null) setGraceMinutes(parseInt(p.grace_minutes) || 15)
+      }
     } catch {
       toast.error('Failed to load attendance')
     } finally {
@@ -98,17 +118,22 @@ export default function MonthlyView() {
   const workingDaysThisMonth = Array.from({ length: daysInMon }, (_, i) => i + 1)
     .filter((d) => !isWeekend(new Date(year, month - 1, d))).length
 
+  // Determine late cutoff label from policy or compute locally
+  const lateCutoffLabel = data?.policy?.late_cutoff || (() => {
+    const [h, m] = shiftStart.split(':').map(Number)
+    const total  = h * 60 + m + graceMinutes
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+  })()
+
   // ── Summary pills ─────────────────────────────────────────────────────────
-  // summary.present from the backend already includes holiday days.
-  // We add a dedicated "Holidays" pill so the user can see the breakdown.
   const summaryPills = data?.summary ? [
-    { label: 'Present',    val: data.summary.present,                             color: '#16a34a' },
-    { label: 'Holidays',   val: data.summary.holiday  || 0,                        color: '#1e40af' },
-    { label: 'Absent/LOP', val: data.summary.absent,                              color: '#dc2626' },
-    { label: 'On Leave',   val: data.summary.leave     || 0,                       color: '#7c3aed' },
-    { label: 'LOP Leave',  val: data.summary.lop_leave || 0,                       color: '#be123c' },
-    { label: 'Late',       val: data.summary.late,                                color: '#d97706' },
-    { label: 'Half Day',   val: data.summary.half_day,                            color: '#b45309' },
+    { label: 'Present',    val: data.summary.present,                                  color: '#16a34a' },
+    { label: 'Holidays',   val: data.summary.holiday  || 0,                            color: '#1e40af' },
+    { label: 'Absent/LOP', val: data.summary.absent,                                   color: '#dc2626' },
+    { label: 'On Leave',   val: data.summary.leave     || 0,                           color: '#7c3aed' },
+    { label: 'LOP Leave',  val: data.summary.lop_leave || 0,                           color: '#be123c' },
+    { label: 'Late',       val: data.summary.late,                                     color: '#d97706' },
+    { label: 'Half Day',   val: data.summary.half_day,                                 color: '#b45309' },
     { label: 'Total Hrs',  val: (data.summary.total_hours?.toFixed(1) || '0.0') + 'h', color: '#1d4ed8' },
     { label: 'OT Hrs',     val: (data.summary.total_ot?.toFixed(1)   || '0.0') + 'h', color: '#7c3aed' },
   ] : []
@@ -125,7 +150,7 @@ export default function MonthlyView() {
             <span>·</span>
             <span>{workingDaysThisMonth} working days</span>
             <span>·</span>
-            <span>Shift {shiftStart}</span>
+            <span>Shift {shiftStart} · Grace {graceMinutes}m · Late after {lateCutoffLabel}</span>
           </div>
         </div>
         <button onClick={nextMonth} style={navBtn}>▶</button>
@@ -170,13 +195,13 @@ export default function MonthlyView() {
             {cells.map((day, i) => {
               if (!day) return <div key={`e-${i}`} style={emptyCell} />
 
-              const dateStr   = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-              const record    = recordMap[dateStr]
+              const dateStr    = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+              const record     = recordMap[dateStr]
               const holidayName = holidayMap[dateStr] || record?.holiday_name
-              const cellDate  = new Date(dateStr)
-              const isWkndDay = isWeekend(cellDate)
-              const isToday   = dateStr === todayStr
-              const isFuture  = dateStr > todayStr
+              const cellDate   = new Date(dateStr)
+              const isWkndDay  = isWeekend(cellDate)
+              const isToday    = dateStr === todayStr
+              const isFuture   = dateStr > todayStr
 
               const missingCheckout = !!(record?.check_in && !record?.check_out && dateStr !== todayStr)
 
@@ -186,16 +211,28 @@ export default function MonthlyView() {
 
               // Determine which status style to show
               let st = null
-              if (record)         st = STATUS_COLOR[effectiveStatus] || STATUS_COLOR.absent
+              if (record)          st = STATUS_COLOR[effectiveStatus] || STATUS_COLOR.absent
               else if (holidayName) st = STATUS_COLOR.holiday
-              else if (isWkndDay)  st = STATUS_COLOR.weekend
+              else if (isWkndDay)   st = STATUS_COLOR.weekend
 
               const isLop     = record?.status === 'lop_leave' || record?.is_lop
               const leaveName = record?.leave_name
+
+              // ── OT detection ──────────────────────────────────────────────
+              const otHours   = parseFloat(record?.ot_hours || 0)
+              const hasOT     = otHours > 0
+
+              // ── Late minutes ──────────────────────────────────────────────
+              const lateMinutes = (effectiveStatus === 'late' && record?.check_in)
+                ? calcLateMinutes(record.check_in, shiftStart, graceMinutes)
+                : 0
+
               let tooltipText = st?.title || ''
               if (holidayName)     tooltipText = `🗓 ${holidayName}`
               if (leaveName)       tooltipText = `${isLop ? 'LOP: ' : ''}${leaveName}`
               if (missingCheckout) tooltipText = `⚠ Missing checkout — auto half-day: ${dateStr}`
+              if (lateMinutes > 0) tooltipText += ` (${lateMinutes}m late)`
+              if (hasOT)           tooltipText += ` · OT: ${otHours.toFixed(1)}h`
 
               const canRegularize = !!(
                 record &&
@@ -212,7 +249,7 @@ export default function MonthlyView() {
                   title={tooltipText}
                   onClick={() => canRegularize && setSelRecord(record)}
                   style={{
-                    padding: '8px', minHeight: '76px',
+                    padding: '6px 8px', minHeight: '76px',
                     borderRight: '1px solid #f1f5f9', borderBottom: '1px solid #f1f5f9',
                     cursor: canRegularize ? 'pointer' : 'default',
                     background: isWkndDay ? '#fafafa' : isToday ? '#eff6ff' : missingCheckout ? '#fff7ed' : '#fff',
@@ -224,7 +261,7 @@ export default function MonthlyView() {
                     background: isToday ? '#1d4ed8' : 'transparent',
                     color: isToday ? '#fff' : isWkndDay ? '#bbb' : isFuture ? '#ccc' : '#333',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '12px', fontWeight: isToday ? 700 : 400, marginBottom: '4px',
+                    fontSize: '12px', fontWeight: isToday ? 700 : 400, marginBottom: '3px',
                   }}>
                     {day}
                   </div>
@@ -240,11 +277,27 @@ export default function MonthlyView() {
                     <span style={{ fontSize: '9px', color: '#bbb' }}>week off</span>
                   )}
 
-                  {/* Status badge */}
-                  {st && (
-                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, background: st.bg, color: st.color }}>
-                      {st.label}
-                    </span>
+                  {/* Status badge row — status + OT badge side by side */}
+                  <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '2px' }}>
+                    {st && (
+                      <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, background: st.bg, color: st.color }}>
+                        {st.label}
+                      </span>
+                    )}
+
+                    {/* ── OT BADGE (NEW) ── show when ot_hours > 0 */}
+                    {hasOT && !isFuture && (
+                      <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd8fe' }}>
+                        OT {otHours.toFixed(1)}h
+                      </span>
+                    )}
+                  </div>
+
+                  {/* ── LATE MINUTES (NEW) ── show how many minutes late */}
+                  {lateMinutes > 0 && (
+                    <p style={{ margin: '0 0 2px', fontSize: '9px', color: '#b45309', fontWeight: 600, lineHeight: 1.2 }}>
+                      +{lateMinutes}m late
+                    </p>
                   )}
 
                   {leaveName && (
@@ -254,7 +307,7 @@ export default function MonthlyView() {
                   )}
 
                   {record?.check_in && (
-                    <p style={{ margin: '3px 0 0', fontSize: '9px', color: missingCheckout ? '#dc2626' : '#888', fontWeight: missingCheckout ? 600 : 400 }}>
+                    <p style={{ margin: '2px 0 0', fontSize: '9px', color: missingCheckout ? '#dc2626' : '#888', fontWeight: missingCheckout ? 600 : 400 }}>
                       {record.check_in}{record.check_out ? ` → ${record.check_out}` : isToday ? ' → ?' : ' → ⚠'}
                     </p>
                   )}
@@ -280,7 +333,12 @@ export default function MonthlyView() {
             <span style={{ fontSize: '11px', color: '#888' }}>{val.title}</span>
           </div>
         ))}
-        <p style={{ fontSize: '11px', color: '#aaa', margin: 0 }}>· Tap absent day to regularize · PH = Public Holiday (counts as present)</p>
+        {/* OT legend entry */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ width: '13px', height: '13px', borderRadius: '3px', background: '#f5f3ff', border: '1px solid #7c3aed', display: 'inline-block' }} />
+          <span style={{ fontSize: '11px', color: '#888' }}>OT (Overtime)</span>
+        </div>
+        <p style={{ fontSize: '11px', color: '#aaa', margin: 0 }}>· Tap absent day to regularize · PH = Public Holiday · OT badge = overtime worked</p>
       </div>
 
       {selRecord && (
