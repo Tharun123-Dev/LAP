@@ -17,6 +17,7 @@ FIX: get_leave_balance_summary() now returns the effective carry_forward
      estimation and BalanceDashboard correctly show/hide the CF section.
 """
 from datetime import date, timedelta
+from decimal import Decimal
 from .models import LeaveBalance, LeaveType
 
 
@@ -52,13 +53,90 @@ def count_working_days(start_date: date, end_date: date, session: str = 'full') 
     return count
 
 
+def _effective_days_allowed(leave_type: LeaveType) -> int:
+    return leave_type.days_allowed
+
+
+def _is_earned_leave_type(leave_type: LeaveType) -> bool:
+    code = (leave_type.code or '').upper()
+    return code in ('EL', 'PL') or 'earned' in (leave_type.name or '').lower()
+
+
+def _employee_joining_date(employee):
+    profile = getattr(employee, 'profile', None)
+    joining_date = getattr(profile, 'joining_date', None)
+    if not joining_date:
+        joining_date = getattr(employee, 'date_joined', None)
+    if hasattr(joining_date, 'date'):
+        joining_date = joining_date.date()
+    return joining_date
+
+
+def _is_employee_on_probation(employee, as_of: date = None) -> bool:
+    if as_of is None:
+        as_of = date.today()
+
+    try:
+        from attendance.settings_helper import get_probation_months
+        from dateutil.relativedelta import relativedelta
+
+        prob_months = int(get_probation_months())
+        if prob_months <= 0:
+            return False
+
+        joining_date = _employee_joining_date(employee)
+        if not joining_date:
+            return False
+
+        probation_end = joining_date + relativedelta(months=prob_months)
+        return as_of < probation_end
+    except Exception:
+        return False
+
+
+def _probation_earned_leave_allowed() -> bool:
+    try:
+        from attendance.settings_helper import _get, _parse_bool
+        return _parse_bool(_get('probation_earned_leave', False))
+    except Exception:
+        return False
+
+
+def _base_allocation_for_employee(employee, leave_type: LeaveType, as_of: date = None) -> int:
+    days_allowed = _effective_days_allowed(leave_type)
+    if (
+        _is_earned_leave_type(leave_type)
+        and _is_employee_on_probation(employee, as_of)
+        and not _probation_earned_leave_allowed()
+    ):
+        return 0
+    return days_allowed
+
+
+def _sync_balance_total(balance: LeaveBalance, base_allocation) -> bool:
+    carried = Decimal(str(balance.carried or 0))
+    new_total = Decimal(str(base_allocation)) + carried
+    min_total = Decimal(str(balance.used or 0)) + Decimal(str(balance.pending or 0))
+    if new_total < min_total:
+        new_total = min_total
+
+    if balance.total == new_total:
+        return False
+
+    balance.total = new_total
+    balance.save(update_fields=['total'])
+    return True
+
+
 def get_or_create_balance(employee, leave_type, year: int) -> LeaveBalance:
+    base_allocation = _base_allocation_for_employee(employee, leave_type)
     balance, _ = LeaveBalance.objects.get_or_create(
         employee=employee,
         leave_type=leave_type,
         year=year,
-        defaults={'total': leave_type.days_allowed},
+        defaults={'total': base_allocation},
     )
+    _sync_balance_total(balance, base_allocation)
     return balance
 
 
@@ -72,19 +150,6 @@ def init_balances_for_employee(employee, year: int = None) -> int:
         year = date.today().year
 
     # ── Probation check ──────────────────────────────────────────────────────
-    on_probation = False
-    try:
-        from notifications.models import SystemSetting
-        from dateutil.relativedelta import relativedelta
-        prob_months  = int(SystemSetting.objects.get(key='probation_period_months').value)
-        joining_date = getattr(employee, 'date_joined', None)
-        if joining_date:
-            if hasattr(joining_date, 'date'):
-                joining_date = joining_date.date()
-            probation_end = joining_date + relativedelta(months=prob_months)
-            on_probation  = date.today() < probation_end
-    except Exception:
-        on_probation = False
     # ─────────────────────────────────────────────────────────────────────────
 
     emp_type = getattr(employee, 'employee_type', 'regular')
@@ -94,10 +159,9 @@ def init_balances_for_employee(employee, year: int = None) -> int:
 
     created_count = 0
     for lt in types:
-        is_el     = lt.code.upper() in ('EL', 'PL') or 'earned' in lt.name.lower()
-        allocated = 0 if (on_probation and is_el) else lt.days_allowed
+        allocated = _base_allocation_for_employee(employee, lt)
 
-        _, created = LeaveBalance.objects.get_or_create(
+        balance, created = LeaveBalance.objects.get_or_create(
             employee=employee,
             leave_type=lt,
             year=year,
@@ -105,6 +169,8 @@ def init_balances_for_employee(employee, year: int = None) -> int:
         )
         if created:
             created_count += 1
+        else:
+            _sync_balance_total(balance, allocated)
 
     return created_count
 
@@ -135,12 +201,13 @@ def sync_balances_for_leave_type(leave_type: LeaveType, year: int = None) -> dic
     created = updated = skipped = 0
 
     for emp in employees:
+        base_allocation = _base_allocation_for_employee(emp, leave_type)
         bal, was_created = LeaveBalance.objects.get_or_create(
             employee=emp,
             leave_type=leave_type,
             year=year,
             defaults={
-                'total':   leave_type.days_allowed,
+                'total':   base_allocation,
                 'used':    0,
                 'pending': 0,
                 'carried': 0,
@@ -152,7 +219,7 @@ def sync_balances_for_leave_type(leave_type: LeaveType, year: int = None) -> dic
             # Compute what the base allocation should be (total minus any carried days)
             carried = float(bal.carried or 0)
             old_base = float(bal.total) - carried
-            new_base = float(leave_type.days_allowed)
+            new_base = float(base_allocation)
 
             if abs(old_base - new_base) < 0.01:
                 skipped += 1
@@ -236,11 +303,11 @@ def process_carry_forward(year: int = None) -> dict:
                 employee=emp,
                 leave_type=lt,
                 year=next_year,
-                defaults={'total': lt.days_allowed},
+                defaults={'total': _base_allocation_for_employee(emp, lt)},
             )
 
             # base allocation + carry-forward
-            next_bal.total   = lt.days_allowed
+            next_bal.total   = _base_allocation_for_employee(emp, lt) + carry_days
             next_bal.carried = carry_days
             next_bal.save(update_fields=['total', 'carried'])
 
@@ -270,7 +337,9 @@ def get_leave_balance_summary(employee, year: int) -> list:
     result = []
     for bal in balances:
         carried   = float(bal.carried or 0)
-        base      = float(bal.leave_type.days_allowed)
+        base      = float(_base_allocation_for_employee(employee, bal.leave_type))
+        if _sync_balance_total(bal, base):
+            bal.refresh_from_db(fields=['total'])
         total     = float(bal.total)
         used      = float(bal.used)
         pending   = float(bal.pending)

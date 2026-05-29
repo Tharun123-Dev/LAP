@@ -791,7 +791,7 @@ class LeavePolicySettingsView(APIView):
                 'days_allowed_source':    'system_settings' if sys_days >= 0 else 'leave_type',
                 'notice_days_source':     'system_settings' if sys_notice > 0 else 'leave_type',
                 'is_paid_source':         'system_settings' if sys_paid >= 0 else 'leave_type',
-                'carry_forward_source':   'system_settings' if sys_cf >= 0 else 'leave_type',
+                'carry_forward_source':   'leave_type',
             })
         return Response(result)
 
@@ -900,11 +900,16 @@ class LeavePolicySettingsView(APIView):
         if updated_model_fields:
             lt.save(update_fields=list(set(updated_model_fields)))
 
+        balance_sync = None
+        if 'days_allowed' in updated_model_fields:
+            balance_sync = sync_balances_for_leave_type(lt, date.today().year)
+
         return Response({
             'message':          'Saved to both LeaveType and SystemSettings',
             'leave_type_id':    lt.id,
             'updated_fields':   list(set(updated_model_fields)),
             'synced_settings':  updated_settings,
+            'balance_sync':     balance_sync,
         })
     
 
