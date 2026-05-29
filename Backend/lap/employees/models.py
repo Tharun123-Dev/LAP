@@ -32,11 +32,16 @@ class EmployeeProfile(models.Model):
         ('intern',              'Intern'),
         ('other',               'Other'),
     ]
+    WORK_MODE_CHOICES = [
+        ('office',          'Work From Office'),
+        ('work_from_home',  'Work From Home'),
+    ]
 
     user           = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     emp_code       = models.CharField(max_length=20, unique=True)
     department     = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL, related_name='employees')
     designation    = models.CharField(max_length=50, choices=DESIGNATION_CHOICES, default='other')
+    work_mode      = models.CharField(max_length=20, choices=WORK_MODE_CHOICES, default='office')
     date_of_birth  = models.DateField(null=True, blank=True)
     joining_date   = models.DateField()
     phone          = models.CharField(max_length=15, blank=True)

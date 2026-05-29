@@ -205,7 +205,7 @@ export default function EmployeesPage() {
           }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
-                {['Emp Code', 'Name', 'Email', 'Role', 'Department', 'Designation', 'Status', 'Actions'].map(h => (
+                {['Emp Code', 'Name', 'Email', 'Role', 'Department', 'Designation', 'Work Mode', 'Status', 'Actions'].map(h => (
                   <th
                     key={h}
                     style={{
@@ -228,7 +228,7 @@ export default function EmployeesPage() {
               {employees.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     style={{
                       padding:   '48px',
                       textAlign: 'center',
@@ -330,6 +330,21 @@ export default function EmployeesPage() {
                   <td style={tdStyle}>
                     <span style={{ whiteSpace: 'nowrap', color: '#333' }}>
                       {emp.designation?.replace(/_/g, ' ') || '—'}
+                    </span>
+                  </td>
+
+                  {/* Work Mode */}
+                  <td style={tdStyle}>
+                    <span style={{
+                      padding:      '3px 10px',
+                      borderRadius: '12px',
+                      fontSize:     '11px',
+                      fontWeight:   600,
+                      background:   emp.work_mode === 'work_from_home' ? '#e0f2fe' : '#f3f4f6',
+                      color:        emp.work_mode === 'work_from_home' ? '#0369a1' : '#374151',
+                      whiteSpace:   'nowrap',
+                    }}>
+                      {emp.work_mode === 'work_from_home' ? 'WFH' : 'Office'}
                     </span>
                   </td>
 

@@ -352,6 +352,7 @@ export default function TodayWidget() {
     try {
       const r = await getTodayApi()
       setToday(r.data)
+      setIsWfh(r.data?.work_mode === 'work_from_home')
     } catch {
       toast.error('Failed to load today status')
     }
@@ -387,7 +388,9 @@ export default function TodayWidget() {
   }
 
   const handleCheckIn = async () => {
-    if (!isWfh && office) {
+    const checkInIsWfh = workMode === 'work_from_home'
+    let submitGps = gps
+    if (!checkInIsWfh && office) {
       if (locError || !gps) { toast.error('Please allow location access first.'); return }
       const dist = haversineMetres(gps.latitude, gps.longitude, office.latitude, office.longitude)
       if (dist > office.radius_meters) {
@@ -395,9 +398,17 @@ export default function TodayWidget() {
         return
       }
     }
+    if (checkInIsWfh && !submitGps) {
+      try {
+        submitGps = await getCurrentPosition()
+        setGps(submitGps)
+      } catch {
+        submitGps = null
+      }
+    }
     setLoading(true)
     try {
-      await checkInApi(isWfh, gps?.latitude ?? null, gps?.longitude ?? null)
+      await checkInApi(checkInIsWfh, submitGps?.latitude ?? null, submitGps?.longitude ?? null)
       toast.success('Checked in!')
       load()
     } catch (e) {
@@ -408,6 +419,7 @@ export default function TodayWidget() {
   }
 
   const handleCheckOut = async () => {
+    let submitGps = gps
     if (!today?.is_wfh && office) {
       if (locError || !gps) { toast.error('Please allow location access first.'); return }
       const dist = haversineMetres(gps.latitude, gps.longitude, office.latitude, office.longitude)
@@ -416,9 +428,17 @@ export default function TodayWidget() {
         return
       }
     }
+    if (today?.is_wfh && !submitGps) {
+      try {
+        submitGps = await getCurrentPosition()
+        setGps(submitGps)
+      } catch {
+        submitGps = null
+      }
+    }
     setLoading(true)
     try {
-      const r = await checkOutApi(gps?.latitude ?? null, gps?.longitude ?? null)
+      const r = await checkOutApi(submitGps?.latitude ?? null, submitGps?.longitude ?? null)
       toast.success(`Checked out! ${r.data.hours_worked}h worked`)
       load()
     } catch (e) {
@@ -455,6 +475,11 @@ export default function TodayWidget() {
   const hoursWorked= today?.record?.hours_worked || today?.hours_worked || 0
   const otHours    = parseFloat(today?.record?.ot_hours ?? today?.ot_hours ?? 0)
   const isWfhDone  = today?.record?.is_wfh ?? today?.is_wfh ?? false
+  const workMode = today?.record?.work_mode || today?.work_mode || (isWfhDone ? 'work_from_home' : 'office')
+  const workModeLabel = workMode === 'work_from_home' ? 'Work From Home' : 'Work From Office'
+  const workModeRule = workMode === 'work_from_home'
+    ? 'Any location allowed for check-in and check-out'
+    : office ? `Office radius: ${office.radius_meters} m` : 'Office location not configured'
   const ciDist     = today?.record?.checkin_distance_m  ?? today?.checkin_distance_m  ?? null
   const coDist     = today?.record?.checkout_distance_m ?? today?.checkout_distance_m ?? null
 
@@ -533,6 +558,22 @@ export default function TodayWidget() {
             )}
           </div>
 
+          {/* Assigned work mode */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            flexWrap: 'wrap', gap: '8px',
+            background: workMode === 'work_from_home' ? '#e0f2fe' : '#f8fafc',
+            border: `1px solid ${workMode === 'work_from_home' ? '#7dd3fc' : '#e2e8f0'}`,
+            color: workMode === 'work_from_home' ? '#0369a1' : '#334155',
+            borderRadius: '10px', padding: '10px 14px',
+            marginBottom: isMobile ? '14px' : '18px',
+            fontSize: isMobile ? '12px' : '13px',
+            fontWeight: 600,
+          }}>
+            <span>Work Mode: {workModeLabel}</span>
+            <span style={{ fontSize: '11px', fontWeight: 500 }}>{workModeRule}</span>
+          </div>
+
           {/* Check-in / Check-out cards */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: isMobile ? '10px' : '12px', marginBottom: isMobile ? '14px' : '18px' }}>
             <InfoCard
@@ -554,7 +595,7 @@ export default function TodayWidget() {
           </div>
 
           {/* WFH toggle — only before check-in */}
-          {!checkedIn && (
+          {!checkedIn && false && (
             <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', cursor: 'pointer', fontSize: isMobile ? '13px' : '14px', color: '#555', userSelect: 'none' }}>
               <div onClick={handleWfhToggle} style={{ width: '42px', height: '24px', borderRadius: '12px', background: isWfh ? '#1a1a2e' : '#ddd', position: 'relative', transition: 'background 0.2s', cursor: 'pointer', flexShrink: 0 }}>
                 <div style={{ position: 'absolute', top: '3px', left: isWfh ? '21px' : '3px', width: '18px', height: '18px', borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />

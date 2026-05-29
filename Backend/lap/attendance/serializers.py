@@ -12,6 +12,7 @@ class OfficeLocationSerializer(serializers.ModelSerializer):
 class AttendanceRecordSerializer(serializers.ModelSerializer):
     employee_name = serializers.SerializerMethodField()
     emp_code      = serializers.SerializerMethodField()
+    work_mode     = serializers.SerializerMethodField()
     regularization_status = serializers.SerializerMethodField()
     has_regularization    = serializers.SerializerMethodField()
 
@@ -20,7 +21,7 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'employee', 'employee_name', 'emp_code',
             'date', 'shift_type', 'check_in', 'check_out', 'check_in_at', 'check_out_at', 'hours_worked',
-            'status', 'is_wfh', 'ot_hours', 'note', 'is_locked',
+            'status', 'is_wfh', 'work_mode', 'ot_hours', 'note', 'is_locked',
             'regularization_status', 'has_regularization',
             'shift_start_snapshot', 'shift_end_snapshot', 'grace_minutes_snapshot',
             'standard_hours_snapshot', 'half_day_hours_snapshot', 'is_overnight_shift',
@@ -37,6 +38,12 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
             return obj.employee.profile.emp_code
         except Exception:
             return ''
+
+    def get_work_mode(self, obj):
+        try:
+            return obj.employee.profile.work_mode
+        except Exception:
+            return 'office'
 
     def get_regularization_status(self, obj):
         try:

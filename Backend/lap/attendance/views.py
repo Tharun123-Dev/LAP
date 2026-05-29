@@ -251,6 +251,13 @@ def _validate_location(lat, lon):
     return True, round(distance_m, 1), office, None
 
 
+def _user_work_mode(user):
+    try:
+        return user.profile.work_mode or 'office'
+    except Exception:
+        return 'office'
+
+
 # ── OFFICE LOCATION ────────────────────────────────────────────────────────────
 
 class OfficeLocationView(APIView):
@@ -286,7 +293,8 @@ class CheckInView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def post(self, request):
-        is_wfh   = request.data.get('is_wfh', False)
+        work_mode = _user_work_mode(request.user)
+        is_wfh   = work_mode == 'work_from_home'
         now_dt   = _now_local()
         now_time = now_dt.time().replace(tzinfo=None)
         active_shift = get_active_shift_for_time(now_time)
@@ -303,7 +311,9 @@ class CheckInView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            lat, lon, distance_m = None, None, None
+            lat = request.data.get('latitude')
+            lon = request.data.get('longitude')
+            distance_m = None
 
         open_record = AttendanceRecord.objects.filter(
             employee=request.user,
@@ -389,6 +399,10 @@ class CheckOutView(APIView):
             record.checkout_latitude   = lat
             record.checkout_longitude  = lon
             record.checkout_distance_m = distance_m
+        elif lat is not None and record.is_wfh:
+            record.checkout_latitude   = lat
+            record.checkout_longitude  = lon
+            record.checkout_distance_m = None
 
         record.status = _get_status(record.check_in, record.check_out, record.hours_worked, record)
         record.save()
@@ -413,6 +427,7 @@ class TodayAttendanceView(APIView):
         return Response({
             'record':  AttendanceRecordSerializer(record).data if record else None,
             'is_wfh':  record.is_wfh if record else False,
+            'work_mode': _user_work_mode(request.user),
             'holiday': {'date': str(holiday.date), 'name': holiday.name} if holiday else None,
             'date':    str(today),
         })

@@ -330,6 +330,35 @@ def _overlapping_run(month, year, period_start, period_end):
     ).first()
 
 
+def _payroll_employee_options(run):
+    processed_ids = set(run.entries.values_list('employee_id', flat=True))
+    as_of = run.period_end
+    employees = User.objects.filter(is_active=True).select_related('profile').order_by(
+        'first_name', 'last_name', 'username'
+    )
+    data = []
+    for emp in employees:
+        structure = SalaryStructure.objects.filter(
+            employee=emp, is_active=True, effective_date__lte=as_of,
+        ).order_by('-effective_date').first()
+        if not structure:
+            structure = SalaryStructure.objects.filter(
+                employee=emp, is_active=True,
+            ).order_by('-effective_date').first()
+        try:
+            emp_code = emp.profile.emp_code
+        except Exception:
+            emp_code = ''
+        data.append({
+            'id': emp.id,
+            'name': emp.get_full_name() or emp.username,
+            'emp_code': emp_code,
+            'has_salary': bool(structure),
+            'processed': emp.id in processed_ids,
+        })
+    return data
+
+
 class PayrollRunListView(generics.ListAPIView):
     queryset           = PayrollRun.objects.all()
     serializer_class   = PayrollRunSerializer
@@ -350,6 +379,10 @@ class CreatePayrollRunView(APIView):
 
         overlap = _overlapping_run(month, year, period_start, period_end)
         if overlap:
+            if overlap.period_start == period_start and overlap.period_end == period_end:
+                data = PayrollRunSerializer(overlap).data
+                data['existing'] = True
+                return Response(data, status=200)
             return Response(
                 {
                     'error': (
@@ -401,10 +434,16 @@ class ProcessPayrollRunView(APIView):
             }, status=400)
 
         with transaction.atomic():
-            if run.status == 'processed':
-                run.entries.all().delete()
+            employee_id = request.data.get('employee') or request.data.get('employee_id')
+            employee_ids = [employee_id] if employee_id else None
+            if employee_id and PayrollEntry.objects.filter(payroll_run=run, employee_id=employee_id).exists():
+                return Response({'error': 'Payroll already processed for this employee in this period'}, status=400)
 
-            created, skipped = process_payroll_run(run)
+            created, skipped = process_payroll_run(run, employee_ids=employee_ids)
+            if not created and employee_id and not skipped:
+                return Response({'error': 'No available employee found to process'}, status=400)
+            if not created and employee_id and skipped:
+                return Response({'error': 'Selected employee has no active salary structure'}, status=400)
             run.status       = 'processed'
             run.processed_by = request.user
             run.save()
@@ -452,6 +491,7 @@ class PayrollRunDetailView(APIView):
         return Response({
             'run':     PayrollRunSerializer(run).data,
             'entries': PayrollEntrySerializer(entries, many=True).data,
+            'available_employees': _payroll_employee_options(run),
         })
 
 

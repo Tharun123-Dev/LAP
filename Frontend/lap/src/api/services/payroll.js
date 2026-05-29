@@ -13,7 +13,7 @@ export const getPayrollSettingsDefaultsApi = ()   => api.get(ENDPOINTS.PAYROLL.S
 export const getRunsApi              = ()          => api.get(ENDPOINTS.PAYROLL.RUNS)
 export const createRunApi            = (data)      => api.post(ENDPOINTS.PAYROLL.RUN_CREATE, data)
 export const getRunDetailApi         = (id)        => api.get(ENDPOINTS.PAYROLL.RUN_DETAIL(id))
-export const processRunApi           = (id)        => api.post(ENDPOINTS.PAYROLL.RUN_PROCESS(id))
+export const processRunApi           = (id, data = {}) => api.post(ENDPOINTS.PAYROLL.RUN_PROCESS(id), data)
 export const approveRunApi           = (id)        => api.post(ENDPOINTS.PAYROLL.RUN_APPROVE(id))
 export const getRunRegisterApi       = (id)        => api.get(ENDPOINTS.PAYROLL.RUN_REGISTER(id))
 

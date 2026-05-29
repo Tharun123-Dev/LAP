@@ -577,7 +577,7 @@ def get_attendance_summary(employee, year, month, period_start=None, period_end=
 
 # ── Main Engine ───────────────────────────────────────────────────────────────
 
-def process_payroll_run(payroll_run: PayrollRun):
+def process_payroll_run(payroll_run: PayrollRun, employee_ids=None):
     """
     All 11 payroll settings read live from SystemSetting at runtime:
     1. basic_salary_percent  — not used in engine (used at salary structure creation)
@@ -616,6 +616,8 @@ def process_payroll_run(payroll_run: PayrollRun):
     da_pct_live   = get_da_percent() / Decimal('100')   # DA from settings, NOT structure
 
     employees = User.objects.filter(is_active=True)
+    if employee_ids:
+        employees = employees.filter(id__in=employee_ids)
     created, skipped = [], []
 
     for emp in employees:

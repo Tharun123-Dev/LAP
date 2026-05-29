@@ -33,7 +33,7 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user_id','emp_code', 'username', 'first_name', 'last_name',
             'email', 'role', 'employee_type', 'is_active',
-            'department', 'department_name', 'designation',
+            'department', 'department_name', 'designation', 'work_mode',
             'date_of_birth', 'joining_date', 'phone', 'address',
             'manager', 'manager_name',
             'bank_account', 'ifsc_code', 'pan_number',
@@ -63,6 +63,9 @@ class CreateEmployeeSerializer(serializers.Serializer):
         queryset=Department.objects.all(), required=False, allow_null=True
     )
     designation   = serializers.CharField(default='other')
+    work_mode     = serializers.ChoiceField(
+        choices=['office', 'work_from_home'], default='office', required=False
+    )
     joining_date  = serializers.DateField()
     phone         = serializers.CharField(required=False, allow_blank=True)
     address       = serializers.CharField(required=False, allow_blank=True)
@@ -120,6 +123,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
             emp_code      = validated_data['emp_code'],
             department    = validated_data.get('department'),
             designation   = validated_data.get('designation', 'other'),
+            work_mode     = validated_data.get('work_mode', 'office'),
             joining_date  = validated_data['joining_date'],
             phone         = validated_data.get('phone', ''),
             address       = validated_data.get('address', ''),

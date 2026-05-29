@@ -118,7 +118,7 @@ class UpdateEmployeeView(APIView):
 
         # Update Profile fields if provided
         profile_fields = [
-            'designation', 'department', 'phone', 'address',
+            'designation', 'work_mode', 'department', 'phone', 'address',
             'manager', 'bank_account', 'ifsc_code', 'pan_number',
             'is_on_probation', 'date_of_birth', 'joining_date'
         ]

@@ -43,6 +43,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
     password: '', role: 'employee', employee_type: 'regular',
     custom_role: '', emp_code: '', department: '',
     designation: 'software_engineer',
+    work_mode: 'office',
     joining_date: new Date().toISOString().split('T')[0],
     phone: '', address: '', manager: '', date_of_birth: '',
   })
@@ -109,6 +110,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
         emp_code:      employee.emp_code      || '',
         department:    employee.department    || '',
         designation:   employee.designation   || 'other',
+        work_mode:     employee.work_mode     || 'office',
         joining_date:  employee.joining_date  || '',
         phone:         employee.phone         || '',
         address:       employee.address       || '',
@@ -330,6 +332,21 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
                         <option key={d} value={d}>{d.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                       ))}
                     </select>
+                  </Field>
+                </Row>
+                <Row>
+                  <Field label="Work Mode">
+                    <select value={form.work_mode} onChange={set('work_mode')} style={inp}>
+                      <option value="office">Work From Office</option>
+                      <option value="work_from_home">Work From Home</option>
+                    </select>
+                  </Field>
+                  <Field label="Location Rule">
+                    <input
+                      value={form.work_mode === 'work_from_home' ? 'Any location allowed' : 'Office radius required'}
+                      style={{ ...inp, background: '#f9fafb', color: '#666' }}
+                      disabled
+                    />
                   </Field>
                 </Row>
                 <div style={{ background: '#f0f4ff', border: '1px solid #c7d7fe', borderRadius: '8px', padding: '12px', marginTop: '8px', fontSize: '12px', color: '#3730a3' }}>

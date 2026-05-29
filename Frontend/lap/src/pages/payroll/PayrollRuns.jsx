@@ -138,6 +138,7 @@ export default function PayrollRuns() {
   const [expandRow, setExpandRow] = useState(null)
   const [settings,  setSettings]  = useState(null)
   const [lockWarn,  setLockWarn]  = useState(null)
+  const [processEmployee, setProcessEmployee] = useState('all')
   // mobile: show list or detail view
   const [mobileView, setMobileView] = useState('list') // 'list' | 'detail'
 
@@ -177,6 +178,7 @@ export default function PayrollRuns() {
 
   const handleSelect = async run => {
     setSelected(run); setExpandRow(null)
+    setProcessEmployee('all')
     await loadDetail(run.id)
     if (isMobile) setMobileView('detail')
   }
@@ -189,16 +191,26 @@ export default function PayrollRuns() {
         payload.period_start = newRun.period_start
         payload.period_end = newRun.period_end
       }
-      await createRunApi(payload); toast.success('Payroll run created!'); load()
+      const r = await createRunApi(payload)
+      toast.success(r.data?.existing ? 'Payroll run already exists - opened it.' : 'Payroll run created!')
+      await load()
+      if (r.data?.id) {
+        setSelected(r.data)
+        setProcessEmployee('all')
+        await loadDetail(r.data.id)
+        if (isMobile) setMobileView('detail')
+      }
     }
     catch (e) { toast.error(e.response?.data?.error || 'Failed to create') }
     finally { setCreating(false) }
   }
 
-  const handleProcess = async id => {
+  const handleProcess = async (id, employee = 'all') => {
     try {
-      const r = await processRunApi(id)
+      const payload = employee && employee !== 'all' ? { employee } : {}
+      const r = await processRunApi(id, payload)
       toast.success(`Processed: ${r.data.created} employees`)
+      setProcessEmployee('all')
       load(); loadDetail(id)
     } catch (e) { toast.error(e.response?.data?.error || 'Processing failed') }
   }
@@ -230,6 +242,10 @@ export default function PayrollRuns() {
     ot_pay: detail.entries.reduce((s,e) => s+n(e.ot_pay), 0),
     extra:  detail.entries.reduce((s,e) => s+n(e.extra_work_pay), 0),
   } : null
+
+  const payrollEmployees = detail?.available_employees || []
+  const remainingPayrollEmployees = payrollEmployees.filter(e => !e.processed && e.has_salary)
+  const noRemainingEmployees = detail && remainingPayrollEmployees.length === 0
 
   // ── Layout decision ───────────────────────────────────────────────────────
   // Desktop/tablet: side-by-side grid when detail is open
@@ -359,23 +375,38 @@ export default function PayrollRuns() {
             </p>
             <p style={{ margin:'4px 0 0', fontSize:'11px', color:'#64748b' }}>{runPeriodLabel(detail.run)}</p>
           </div>
-          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
-            {can('process_payroll') && detail.run.status === 'draft' && (
+          <div style={{ display:'flex', gap:'8px', flexWrap:'wrap', justifyContent:'flex-end' }}>
+            {can('process_payroll') && detail.run.status !== 'locked' && (
+              <>
+              <select
+                value={processEmployee}
+                onChange={e => setProcessEmployee(e.target.value)}
+                disabled={!!lockWarn || noRemainingEmployees}
+                style={{ ...SEL, minWidth:'210px', background: (!!lockWarn || noRemainingEmployees) ? '#f3f4f6' : '#fff' }}
+              >
+                <option value="all">All remaining employees ({remainingPayrollEmployees.length})</option>
+                {payrollEmployees.map(emp => (
+                  <option key={emp.id} value={emp.id} disabled={emp.processed || !emp.has_salary}>
+                    {emp.emp_code ? `${emp.emp_code} - ` : ''}{emp.name}{emp.processed ? ' - processed' : !emp.has_salary ? ' - no salary' : ''}
+                  </option>
+                ))}
+              </select>
               <button
-                onClick={() => !lockWarn && handleProcess(detail.run.id)}
-                disabled={!!lockWarn}
+                onClick={() => !lockWarn && !noRemainingEmployees && handleProcess(detail.run.id, processEmployee)}
+                disabled={!!lockWarn || noRemainingEmployees}
                 style={{
                   padding:'8px 16px',
-                  background: lockWarn ? '#f3f4f6' : '#fef9c3',
-                  color:      lockWarn ? '#9ca3af' : '#854d0e',
-                  border:     `1px solid ${lockWarn ? '#e5e7eb' : '#fde047'}`,
+                  background: (lockWarn || noRemainingEmployees) ? '#f3f4f6' : '#fef9c3',
+                  color:      (lockWarn || noRemainingEmployees) ? '#9ca3af' : '#854d0e',
+                  border:     `1px solid ${(lockWarn || noRemainingEmployees) ? '#e5e7eb' : '#fde047'}`,
                   borderRadius:'8px', fontSize:'13px', fontWeight:600,
-                  cursor: lockWarn ? 'not-allowed' : 'pointer',
+                  cursor: (lockWarn || noRemainingEmployees) ? 'not-allowed' : 'pointer',
                   whiteSpace:'nowrap',
                 }}
               >
-                {lockWarn ? '🔒 Locked' : '▶ Process'}
+                {lockWarn ? 'Locked' : noRemainingEmployees ? 'All Processed' : processEmployee === 'all' ? 'Process All' : 'Process One'}
               </button>
+              </>
             )}
             {can('approve_payroll') && detail.run.status === 'processed' && (
               <button
