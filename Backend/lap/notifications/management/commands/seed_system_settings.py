@@ -242,9 +242,9 @@ SETTINGS = [
         description='Employer ESI contribution = gross × this % (part of CTC). Shown in CTC breakup.',
     ),
     dict(
-        key='payroll_lock_day', value='25', value_type='integer', category='payroll',
+        key='payroll_lock_day', value='1', value_type='integer', category='payroll',
         label='Payroll Lock Day (1–31)',
-        description='Attendance is locked for payroll calculation only after this day of the month. E.g. set 26 → payroll run button is disabled until date ≥ 26. Change anytime — takes effect immediately.',
+        description='Fixed at day 1. Payroll for a completed month can be approved and locked from the 1st of the next month.',
     ),
     dict(
         key='tds_flat_percent_contract', value='10', value_type='decimal', category='payroll',

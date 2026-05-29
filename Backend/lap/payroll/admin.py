@@ -13,7 +13,7 @@ class SalaryStructureAdmin(admin.ModelAdmin):
 
 @admin.register(PayrollRun)
 class PayrollRunAdmin(admin.ModelAdmin):
-    list_display = ['month', 'year', 'status', 'processed_by', 'created_at']
+    list_display = ['month', 'year', 'period_start', 'period_end', 'status', 'processed_by', 'created_at']
 
 @admin.register(PayrollEntry)
 class PayrollEntryAdmin(admin.ModelAdmin):

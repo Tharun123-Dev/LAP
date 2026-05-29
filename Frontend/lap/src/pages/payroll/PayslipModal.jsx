@@ -55,6 +55,9 @@ export default function PayslipModal({ entry, onClose }) {
 
   const run       = entry.payroll_run && typeof entry.payroll_run === 'object' ? entry.payroll_run : {}
   const monthName = run.month ? `${MONTHS[run.month]} ${run.year}` : 'Payslip'
+  const splitLabel = run.period_start && run.period_end && run.period_label !== 'Full month'
+    ? `${run.period_start} to ${run.period_end}`
+    : ''
   const hasLOP    = n(entry.lop_days) > 0
   const hasOT     = n(entry.ot_hours) > 0
   const hasExtra  = n(entry.extra_work_days) > 0
@@ -144,6 +147,7 @@ export default function PayslipModal({ entry, onClose }) {
             <div style={{ textAlign: 'right' }}>
               <p style={{ margin: 0, fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Payslip for</p>
               <p style={{ margin: '4px 0 0', fontSize: '22px', fontWeight: 700, color: '#fff' }}>{monthName}</p>
+              {splitLabel && <p style={{ margin: '3px 0 0', fontSize: '11px', color: 'rgba(255,255,255,0.65)' }}>{splitLabel}</p>}
               {/* Currency badge — so reader knows which currency is used */}
               {currency !== 'INR' && (
                 <span style={{ display: 'inline-block', marginTop: '6px', fontSize: '10px', background: 'rgba(255,255,255,0.15)', color: '#fff', padding: '2px 8px', borderRadius: '20px' }}>

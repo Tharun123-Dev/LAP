@@ -9,6 +9,10 @@ const MONTH_SHORT = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','O
 const fmt  = (v) => `₹${parseFloat(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 const n    = (v) => parseFloat(v || 0)
 const fmtD = (v) => parseFloat(v || 0).toFixed(1)
+const periodLabel = (run) => {
+  if (!run?.period_start || !run?.period_end || run.period_label === 'Full month') return ''
+  return `${run.period_start} to ${run.period_end}`
+}
 
 export default function MyPayslips() {
   const [payslips, setPayslips] = useState([])
@@ -78,7 +82,9 @@ export default function MyPayslips() {
           {payslips.map(p => {
             const runMonth   = getRunField(p, 'month')
             const runYear    = getRunField(p, 'year')
+            const run        = p.payroll_run && typeof p.payroll_run === 'object' ? p.payroll_run : {}
             const monthLabel = runMonth ? `${MONTH_NAMES[runMonth]} ${runYear}` : 'Payslip'
+            const splitLabel = periodLabel(run)
             const hasLOP     = n(p.lop_days) > 0
             const hasOT      = n(p.ot_hours) > 0
 
@@ -95,6 +101,7 @@ export default function MyPayslips() {
                   <div>
                     <p style={{ margin: 0, fontWeight: 700, fontSize: '15px', color: '#111' }}>{monthLabel}</p>
                     <div style={{ display: 'flex', gap: '6px', marginTop: '5px', flexWrap: 'wrap' }}>
+                      {splitLabel && <span style={{ fontSize: '11px', color: '#64748b' }}>{splitLabel}</span>}
                       <span style={{ fontSize: '11px', color: '#888' }}>{fmtD(p.present_days)} days worked</span>
                       {hasLOP && <span style={{ padding: '1px 7px', background: '#fff7ed', color: '#ea580c', borderRadius: '5px', fontSize: '11px', fontWeight: 600 }}>⚡ {fmtD(p.lop_days)} LOP</span>}
                       {hasOT  && <span style={{ padding: '1px 7px', background: '#faf5ff', color: '#7c3aed', borderRadius: '5px', fontSize: '11px', fontWeight: 600 }}>⏱ {parseFloat(p.ot_hours).toFixed(1)}h OT</span>}

@@ -184,7 +184,8 @@ export default function SystemSettings() {
   })
 
   const renderInput = (setting) => {
-    const value     = getValue(setting)
+    const isFixedPayrollLock = setting.key === 'payroll_lock_day'
+    const value     = isFixedPayrollLock ? '1' : getValue(setting)
     const isChanged = edits[setting.key] !== undefined
 
     if (setting.value_type === 'boolean') {
@@ -245,8 +246,8 @@ export default function SystemSettings() {
         value={value}
         type={setting.value_type === 'time' ? 'time' : ['integer', 'decimal'].includes(setting.value_type) ? 'number' : 'text'}
         step={setting.value_type === 'decimal' ? '0.01' : '1'}
-        onChange={e => canEdit && handleChange(setting.key, e.target.value)}
-        disabled={!canEdit}
+        onChange={e => canEdit && !isFixedPayrollLock && handleChange(setting.key, e.target.value)}
+        disabled={!canEdit || isFixedPayrollLock}
         style={{
           width:       '100%',
           padding:     '9px 12px',
@@ -254,7 +255,7 @@ export default function SystemSettings() {
           border:      `1px solid ${isChanged ? '#fde047' : '#ddd'}`,
           fontSize:    '13px',
           boxSizing:   'border-box',
-          background:  canEdit ? '#fff' : '#f9fafb',
+          background:  canEdit && !isFixedPayrollLock ? '#fff' : '#f9fafb',
           outline:     'none',
         }}
       />

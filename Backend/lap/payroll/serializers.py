@@ -158,11 +158,13 @@ class PayrollRunSerializer(serializers.ModelSerializer):
     approved_by_name  = serializers.SerializerMethodField()
     entry_count       = serializers.SerializerMethodField()
     total_net_pay     = serializers.SerializerMethodField()
+    period_label      = serializers.SerializerMethodField()
 
     class Meta:
         model  = PayrollRun
         fields = [
-            'id', 'month', 'year', 'status', 'notes',
+            'id', 'month', 'year', 'period_start', 'period_end',
+            'period_label', 'status', 'notes',
             'processed_by', 'processed_by_name',
             'approved_by',  'approved_by_name',
             'entry_count',  'total_net_pay',
@@ -180,6 +182,9 @@ class PayrollRunSerializer(serializers.ModelSerializer):
 
     def get_total_net_pay(self, obj):
         return float(sum(e.net_pay for e in obj.entries.all()))
+
+    def get_period_label(self, obj):
+        return obj.period_label
 
 
 class PayrollEntrySerializer(serializers.ModelSerializer):

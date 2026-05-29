@@ -30,6 +30,10 @@ const MONTHS      = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','O
 const MONTHS_FULL = ['','January','February','March','April','May','June','July','August','September','October','November','December']
 const fmt = v => `₹${parseFloat(v||0).toLocaleString('en-IN',{minimumFractionDigits:2})}`
 const n   = v => parseFloat(v||0)
+const runPeriodLabel = run => {
+  if (!run?.period_start || !run?.period_end || run.period_label === 'Full month') return 'Full month'
+  return `${run.period_start} to ${run.period_end}`
+}
 
 const STATUS_STYLE = {
   draft:     { bg:'#f3f4f6', color:'#6b7280', dot:'#9ca3af' },
@@ -126,7 +130,7 @@ export default function PayrollRuns() {
   const [runs,      setRuns]      = useState([])
   const [loading,   setLoading]   = useState(false)
   const [creating,  setCreating]  = useState(false)
-  const [newRun,    setNewRun]    = useState({ month: new Date().getMonth()+1, year: new Date().getFullYear() })
+  const [newRun,    setNewRun]    = useState({ month: new Date().getMonth()+1, year: new Date().getFullYear(), period_start:'', period_end:'' })
   const [selected,  setSelected]  = useState(null)
   const [detail,    setDetail]    = useState(null)
   const [adjEntry,  setAdjEntry]  = useState(null)
@@ -179,7 +183,14 @@ export default function PayrollRuns() {
 
   const handleCreate = async () => {
     setCreating(true)
-    try { await createRunApi(newRun); toast.success('Payroll run created!'); load() }
+    try {
+      const payload = { month:newRun.month, year:newRun.year }
+      if (newRun.period_start && newRun.period_end) {
+        payload.period_start = newRun.period_start
+        payload.period_end = newRun.period_end
+      }
+      await createRunApi(payload); toast.success('Payroll run created!'); load()
+    }
     catch (e) { toast.error(e.response?.data?.error || 'Failed to create') }
     finally { setCreating(false) }
   }
@@ -244,13 +255,28 @@ export default function PayrollRuns() {
               onChange={e => setNewRun(p=>({...p, year:parseInt(e.target.value)}))}
               style={{ ...SEL, width:'80px', flex:'0 0 80px' }}
             />
+            <input
+              type="date" value={newRun.period_start}
+              onChange={e => setNewRun(p=>({...p, period_start:e.target.value}))}
+              title="Split start date"
+              style={{ ...SEL, flex:'1 1 142px', minWidth:0 }}
+            />
+            <input
+              type="date" value={newRun.period_end}
+              onChange={e => setNewRun(p=>({...p, period_end:e.target.value}))}
+              title="Split end date"
+              style={{ ...SEL, flex:'1 1 142px', minWidth:0 }}
+            />
             <button onClick={handleCreate} disabled={creating} style={{ ...BP, flex:'0 0 auto' }}>
               {creating ? '…' : 'Create'}
             </button>
           </div>
+          <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#64748b' }}>
+            Leave dates blank for the normal full-month payroll. Select dates for split payroll, for example 1-15 and then 16-end after salary changes.
+          </p>
           {settings && (
             <p style={{ margin:'8px 0 0', fontSize:'10px', color:'#ea580c' }}>
-              🔒 Lock day: <strong>Day {settings.payroll_lock_day}</strong> — can only process on/after this day
+              Lock day: <strong>Day 1</strong> - fixed from System Settings
             </p>
           )}
         </div>
@@ -292,6 +318,7 @@ export default function PayrollRuns() {
                   <span>{run.entry_count||0} employees</span>
                   <span style={{ fontWeight:600, color:'#16a34a' }}>₹{n(run.total_net_pay).toLocaleString('en-IN')}</span>
                 </div>
+                <div style={{ fontSize:'11px', color:'#64748b', marginTop:'4px' }}>{runPeriodLabel(run)}</div>
               </div>
             )
           })}
@@ -330,6 +357,7 @@ export default function PayrollRuns() {
               {detail.entries.length} employees · <strong style={{ textTransform:'capitalize' }}>{detail.run.status}</strong>
               {detail.run.locked_at && <span> · Locked {new Date(detail.run.locked_at).toLocaleDateString()}</span>}
             </p>
+            <p style={{ margin:'4px 0 0', fontSize:'11px', color:'#64748b' }}>{runPeriodLabel(detail.run)}</p>
           </div>
           <div style={{ display:'flex', gap:'8px', flexWrap:'wrap' }}>
             {can('process_payroll') && detail.run.status === 'draft' && (

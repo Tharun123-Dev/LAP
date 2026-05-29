@@ -1,3 +1,5 @@
+import calendar
+from datetime import date
 from django.db import models
 
 # Create your models here.
@@ -205,6 +207,8 @@ class PayrollRun(models.Model):
 
     month        = models.IntegerField()
     year         = models.IntegerField()
+    period_start = models.DateField(null=True, blank=True)
+    period_end   = models.DateField(null=True, blank=True)
     status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
     processed_by = models.ForeignKey(
         User, null=True, blank=True,
@@ -219,11 +223,27 @@ class PayrollRun(models.Model):
     locked_at    = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ['month', 'year']
-        ordering        = ['-year', '-month']
+        unique_together = ['month', 'year', 'period_start', 'period_end']
+        ordering        = ['-year', '-month', '-period_start']
 
     def __str__(self):
-        return f"Payroll {self.month}/{self.year} — {self.status}"
+        return f"Payroll {self.month}/{self.year} ({self.period_label}) - {self.status}"
+
+    def save(self, *args, **kwargs):
+        if not self.period_start or not self.period_end:
+            last_day = calendar.monthrange(self.year, self.month)[1]
+            self.period_start = date(self.year, self.month, 1)
+            self.period_end = date(self.year, self.month, last_day)
+        super().save(*args, **kwargs)
+
+    @property
+    def period_label(self):
+        if not self.period_start or not self.period_end:
+            return 'Full month'
+        last_day = calendar.monthrange(self.year, self.month)[1]
+        if self.period_start.day == 1 and self.period_end.day == last_day:
+            return 'Full month'
+        return f"{self.period_start.day}-{self.period_end.day}"
 
 
 class PayrollEntry(models.Model):

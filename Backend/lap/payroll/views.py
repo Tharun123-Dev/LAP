@@ -1,4 +1,5 @@
 # payroll/views.py
+import calendar
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -299,6 +300,36 @@ class MySalaryStructureView(APIView):
 
 # ── PAYROLL RUNS ──────────────────────────────────────────────────────────────
 
+def _run_period_from_request(request, month, year):
+    last_day = calendar.monthrange(year, month)[1]
+    start_raw = request.data.get('period_start') or request.data.get('start_date')
+    end_raw = request.data.get('period_end') or request.data.get('end_date')
+
+    if start_raw or end_raw:
+        if not start_raw or not end_raw:
+            raise ValueError('Both period_start and period_end are required for split payroll')
+        period_start = datetime.strptime(str(start_raw), '%Y-%m-%d').date()
+        period_end = datetime.strptime(str(end_raw), '%Y-%m-%d').date()
+    else:
+        period_start = date(year, month, 1)
+        period_end = date(year, month, last_day)
+
+    if period_start.year != year or period_start.month != month or period_end.year != year or period_end.month != month:
+        raise ValueError('Payroll period dates must be inside the selected month/year')
+    if period_start > period_end:
+        raise ValueError('period_start cannot be after period_end')
+    return period_start, period_end
+
+
+def _overlapping_run(month, year, period_start, period_end):
+    return PayrollRun.objects.filter(
+        month=month,
+        year=year,
+        period_start__lte=period_end,
+        period_end__gte=period_start,
+    ).first()
+
+
 class PayrollRunListView(generics.ListAPIView):
     queryset           = PayrollRun.objects.all()
     serializer_class   = PayrollRunSerializer
@@ -312,16 +343,29 @@ class CreatePayrollRunView(APIView):
         month = int(request.data.get('month', date.today().month))
         year  = int(request.data.get('year',  date.today().year))
         notes = request.data.get('notes', '')
+        try:
+            period_start, period_end = _run_period_from_request(request, month, year)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=400)
 
-        if PayrollRun.objects.filter(month=month, year=year).exists():
+        overlap = _overlapping_run(month, year, period_start, period_end)
+        if overlap:
             return Response(
-                {'error': f'Payroll run for {month}/{year} already exists'},
+                {
+                    'error': (
+                        f'Payroll already exists for {overlap.period_label} '
+                        f'({overlap.period_start} to {overlap.period_end}). '
+                        'Choose only remaining dates for a split payroll.'
+                    )
+                },
                 status=400
             )
 
         run = PayrollRun.objects.create(
             month        = month,
             year         = year,
+            period_start = period_start,
+            period_end   = period_end,
             notes        = notes,
             processed_by = request.user,
             status       = 'draft',
@@ -366,7 +410,7 @@ class ProcessPayrollRunView(APIView):
             run.save()
 
         return Response({
-            'message': f'Payroll processed for {run.month}/{run.year}',
+            'message': f'Payroll processed for {run.month}/{run.year} ({run.period_label})',
             'created': len(created),
             'skipped': skipped,
             'run':     PayrollRunSerializer(run).data,
@@ -391,7 +435,7 @@ class ApprovePayrollRunView(APIView):
         run.save()
 
         return Response({
-            'message': f'Payroll {run.month}/{run.year} approved and locked',
+            'message': f'Payroll {run.month}/{run.year} ({run.period_label}) approved and locked',
             'run':     PayrollRunSerializer(run).data,
         })
 

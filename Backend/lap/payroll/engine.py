@@ -53,9 +53,24 @@ def get_active_structure(employee, as_of_date):
     ).order_by('effective_date').first()
 
 
-def get_approved_leave_dates(employee, year, month):
+def get_run_period(year, month, period_start=None, period_end=None):
     start_of_month = date(year, month, 1)
-    end_of_month   = date(year, month, calendar.monthrange(year, month)[1])
+    end_of_month = date(year, month, calendar.monthrange(year, month)[1])
+    return period_start or start_of_month, period_end or end_of_month
+
+
+def count_working_days_between(start_date, end_date):
+    total = 0
+    cur = start_date
+    while cur <= end_date:
+        if not is_weekend(cur):
+            total += 1
+        cur += timedelta(days=1)
+    return total
+
+
+def get_approved_leave_dates(employee, year, month, period_start=None, period_end=None):
+    start_of_month, end_of_month = get_run_period(year, month, period_start, period_end)
 
     approved = LeaveRequest.objects.filter(
         employee=employee, status='approved',
@@ -69,7 +84,7 @@ def get_approved_leave_dates(employee, year, month):
         is_half = lr.session in ('first_half', 'second_half')
         cur = lr.start_date
         while cur <= lr.end_date:
-            if cur.year == year and cur.month == month and not is_weekend(cur):
+            if start_of_month <= cur <= end_of_month and not is_weekend(cur):
                 if is_lop:
                     lop_dates.add(cur)
                 elif is_half:
@@ -120,9 +135,15 @@ def calculate_ot_pay(basic: Decimal, working_days: int, ot_hours: Decimal) -> De
     return ROUND2(hourly_rate * multiplier * ot_hours)
 
 
-def calculate_employee_payroll_values(emp, structure, year, month):
-    working_days, days_in_month = get_working_days_in_month(year, month)
-    att = get_attendance_summary(emp, year, month)
+def calculate_employee_payroll_values(emp, structure, year, month, period_start=None, period_end=None):
+    full_working_days, days_in_month = get_working_days_in_month(year, month)
+    period_start, period_end = get_run_period(year, month, period_start, period_end)
+    working_days = count_working_days_between(period_start, period_end)
+    period_factor = (
+        Decimal(str(working_days)) / Decimal(str(full_working_days))
+        if full_working_days > 0 else Decimal('0')
+    )
+    att = get_attendance_summary(emp, year, month, period_start, period_end)
     present = att['present']
     lop_days = att['lop_days']
     late_lop = att['late_lop']
@@ -142,14 +163,14 @@ def calculate_employee_payroll_values(emp, structure, year, month):
     esi_threshold = get_esi_threshold()
     da_pct_live = get_da_percent() / Decimal('100')
 
-    basic = ROUND2(structure.basic)
-    hra = ROUND2(structure.hra)
+    basic = ROUND2(structure.basic * period_factor)
+    hra = ROUND2(structure.hra * period_factor)
     da = ROUND2(basic * da_pct_live)
-    transport = ROUND2(structure.transport)
-    medical = ROUND2(structure.medical)
-    other = ROUND2(structure.other_allowance)
+    transport = ROUND2(structure.transport * period_factor)
+    medical = ROUND2(structure.medical * period_factor)
+    other = ROUND2(structure.other_allowance * period_factor)
 
-    monthly_ctc = ROUND2(Decimal(str(structure.ctc)) / Decimal('12'))
+    monthly_ctc = ROUND2((Decimal(str(structure.ctc)) / Decimal('12')) * period_factor)
     special = ROUND2(monthly_ctc - basic - hra - da - transport - medical - other)
     special = max(special, Decimal('0'))
 
@@ -213,6 +234,8 @@ def queue_locked_regularization_adjustment(regularization):
         month=record.date.month,
         year=record.date.year,
         status='locked',
+        period_start__lte=record.date,
+        period_end__gte=record.date,
     ).first()
     if not source_run:
         return None
@@ -322,9 +345,8 @@ def apply_pending_carry_forward_adjustments(entry):
         entry.save(update_fields=['gross', 'total_deductions', 'net_pay'])
 
 
-def count_comp_off_leave_days(employee, year, month):
-    start_of_month = date(year, month, 1)
-    end_of_month = date(year, month, calendar.monthrange(year, month)[1])
+def count_comp_off_leave_days(employee, year, month, period_start=None, period_end=None):
+    start_of_month, end_of_month = get_run_period(year, month, period_start, period_end)
     approved = LeaveRequest.objects.filter(
         employee=employee,
         status='approved',
@@ -339,13 +361,14 @@ def count_comp_off_leave_days(employee, year, month):
     return total
 
 
-def get_attendance_summary(employee, year, month):
+def get_attendance_summary(employee, year, month, period_start=None, period_end=None):
     _, days_in_month = calendar.monthrange(year, month)
+    period_start, period_end = get_run_period(year, month, period_start, period_end)
 
     records = AttendanceRecord.objects.filter(
         employee=employee,
-        date__year=year,
-        date__month=month
+        date__gte=period_start,
+        date__lte=period_end,
     )
 
     try:
@@ -401,13 +424,13 @@ def get_attendance_summary(employee, year, month):
     from attendance.models import Holiday
     
     holiday_dates = set(
-        Holiday.objects.filter(date__year=year, date__month=month)
+        Holiday.objects.filter(date__gte=period_start, date__lte=period_end)
         .values_list('date', flat=True)
     )
     paid_full_dates, paid_half_dates, lop_dates = (
-        get_approved_leave_dates(employee, year, month)
+        get_approved_leave_dates(employee, year, month, period_start, period_end)
     )
-    comp_off_days = count_comp_off_leave_days(employee, year, month)
+    comp_off_days = count_comp_off_leave_days(employee, year, month, period_start, period_end)
 
     present    = Decimal('0')
     lop        = Decimal('0')
@@ -417,8 +440,9 @@ def get_attendance_summary(employee, year, month):
 
     auto_absent_enabled = get_auto_absent_enabled()
 
-    for day in range(1, days_in_month + 1):
-        d = date(year, month, day)
+    cur = period_start
+    while cur <= period_end:
+        d = cur
 
         if is_weekend(d):
             recs = record_map.get(d, [])
@@ -433,6 +457,7 @@ def get_attendance_summary(employee, year, month):
                     })
                     if rec.ot_hours:
                         ot_hrs += Decimal(str(rec.ot_hours))
+            cur += timedelta(days=1)
             continue
 
         recs = record_map.get(d, [])
@@ -457,6 +482,7 @@ def get_attendance_summary(employee, year, month):
                     })
                     if rec.ot_hours:
                         ot_hrs += Decimal(str(rec.ot_hours))
+            cur += timedelta(days=1)
             continue   # skip ALL record / auto-absent processing for this date
 
         if recs:
@@ -517,6 +543,8 @@ def get_attendance_summary(employee, year, month):
                 if auto_absent_enabled:
                     lop += Decimal('1')
 
+        cur += timedelta(days=1)
+
     late_lop = calculate_late_lop(late_count)
 
     raw_extra_days = Decimal(str(len(extra_work_dates)))
@@ -527,9 +555,9 @@ def get_attendance_summary(employee, year, month):
 
     # Count holidays this month for display in payslip attendance section
     from attendance.models import Holiday as _Holiday
-    holiday_count = _Holiday.objects.filter(date__year=year, date__month=month).count()
+    holiday_count = _Holiday.objects.filter(date__gte=period_start, date__lte=period_end).count()
     holiday_names = list(
-        _Holiday.objects.filter(date__year=year, date__month=month)
+        _Holiday.objects.filter(date__gte=period_start, date__lte=period_end)
         .values_list('name', flat=True)
     )
 
@@ -570,8 +598,16 @@ def process_payroll_run(payroll_run: PayrollRun):
     """
     month = payroll_run.month
     year  = payroll_run.year
-    working_days, days_in_month = get_working_days_in_month(year, month)
-    as_of = date(year, month, days_in_month)
+    full_working_days, days_in_month = get_working_days_in_month(year, month)
+    period_start, period_end = get_run_period(
+        year, month, payroll_run.period_start, payroll_run.period_end
+    )
+    working_days = count_working_days_between(period_start, period_end)
+    period_factor = (
+        Decimal(str(working_days)) / Decimal(str(full_working_days))
+        if full_working_days > 0 else Decimal('0')
+    )
+    as_of = period_end
 
     # ── Read ALL live rates from System Settings ──────────────────────
     pf_emp_pct    = get_pf_employee_percent()  / Decimal('100')
@@ -592,7 +628,7 @@ def process_payroll_run(payroll_run: PayrollRun):
             continue
 
         # ── Attendance ────────────────────────────────────────────────
-        att           = get_attendance_summary(emp, year, month)
+        att           = get_attendance_summary(emp, year, month, period_start, period_end)
         present       = att['present']
         lop_days      = att['lop_days']
         late_lop      = att['late_lop']
@@ -612,19 +648,19 @@ def process_payroll_run(payroll_run: PayrollRun):
 
         # ── Step 1: Full monthly earnings ─────────────────────────────
         # Basic and HRA are from the salary structure (set at creation time)
-        basic     = ROUND2(structure.basic)
-        hra       = ROUND2(structure.hra)
+        basic     = ROUND2(structure.basic * period_factor)
+        hra       = ROUND2(structure.hra * period_factor)
 
         # DA: LIVE from system setting — changing da_percent in System Settings
         # takes effect on the very next payroll run without editing salary structure
         da        = ROUND2(basic * da_pct_live)
 
-        transport = ROUND2(structure.transport)
-        medical   = ROUND2(structure.medical)
-        other     = ROUND2(structure.other_allowance)
+        transport = ROUND2(structure.transport * period_factor)
+        medical   = ROUND2(structure.medical * period_factor)
+        other     = ROUND2(structure.other_allowance * period_factor)
 
         # Special allowance = CTC monthly − all named components
-        monthly_ctc = ROUND2(Decimal(str(structure.ctc)) / Decimal('12'))
+        monthly_ctc = ROUND2((Decimal(str(structure.ctc)) / Decimal('12')) * period_factor)
         special = ROUND2(
             monthly_ctc - basic - hra - da - transport - medical - other
         )
@@ -673,7 +709,7 @@ def process_payroll_run(payroll_run: PayrollRun):
             payroll_run       = payroll_run,
             employee          = emp,
             salary_structure  = structure,
-            total_days        = days_in_month,
+            total_days        = (period_end - period_start).days + 1,
             working_days      = working_days,
             present_days      = effective_present,
             lop_days          = total_lop,

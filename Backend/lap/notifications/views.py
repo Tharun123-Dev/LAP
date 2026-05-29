@@ -102,7 +102,7 @@ DEFAULT_SETTINGS = [
     {'key': 'sandwich_rule_enabled',    'label': 'Sandwich Rule Enabled',        'value': 'true',       'value_type': 'boolean',  'category': 'leave',      'description': 'Count sandwiched weekends as leave'},
     {'key': 'el_max_carry_forward',     'label': 'Max EL Carry Forward (Days)',  'value': '45',         'value_type': 'integer',  'category': 'leave',      'description': 'Max Earned Leave days that carry forward'},
     # Payroll
-    {'key': 'payroll_lock_day',         'label': 'Payroll Lock Day',             'value': '25',         'value_type': 'integer',  'category': 'payroll',    'description': 'Day of month attendance locks for payroll'},
+    {'key': 'payroll_lock_day',         'label': 'Payroll Lock Day',             'value': '1',          'value_type': 'integer',  'category': 'payroll',    'description': 'Fixed at day 1. Payroll for a completed month can be approved and locked from the 1st of the next month.'},
     {'key': 'overtime_multiplier',      'label': 'Overtime Multiplier',          'value': '1.5',        'value_type': 'decimal',  'category': 'payroll',    'description': 'OT pay multiplier (1.5 = 1.5x hourly rate)'},
     {'key': 'esi_threshold_salary',     'label': 'ESI Wage Threshold (₹)',       'value': '21000',      'value_type': 'integer',  'category': 'payroll',    'description': 'Gross below this = ESI applicable'},
     {'key': 'pt_threshold_salary',      'label': 'PT Gross Threshold (INR)',     'value': '15000',      'value_type': 'integer',  'category': 'payroll',    'description': 'Monthly gross salary threshold for Professional Tax'},
@@ -118,7 +118,7 @@ DEFAULT_SETTINGS = [
 
 def seed_default_settings():
     for s in DEFAULT_SETTINGS:
-        SystemSetting.objects.get_or_create(
+        obj, _ = SystemSetting.objects.get_or_create(
             key=s['key'],
             defaults={
                 'value':       s['value'],
@@ -128,6 +128,10 @@ def seed_default_settings():
                 'description': s['description'],
             }
         )
+        if s['key'] == 'payroll_lock_day' and obj.value != '1':
+            obj.value = '1'
+            obj.description = s['description']
+            obj.save(update_fields=['value', 'description'])
 class SystemSettingsView(APIView):
     """GET /api/system-settings/ — list all, POST to bulk update (Admin only)."""
 
@@ -153,6 +157,8 @@ class SystemSettingsView(APIView):
         errors = []
         for key, value in updates.items():
             try:
+                if key == 'payroll_lock_day':
+                    value = '1'
                 setting = SystemSetting.objects.get(key=key)
                 setting.value = str(value)
                 setting.updated_by = request.user
@@ -176,6 +182,9 @@ class SystemSettingDetailView(APIView):
         value = request.data.get('value')
         if value is None:
             return Response({'error': '"value" field required'}, status=400)
+
+        if key == 'payroll_lock_day':
+            value = '1'
 
         setting.value = str(value)
         setting.updated_by = request.user
