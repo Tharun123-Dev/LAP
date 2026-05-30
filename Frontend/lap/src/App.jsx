@@ -38,7 +38,8 @@ export default function App() {
           <Route path="leave"         element={<ProtectedRoute requiredPermission="view_leave"><LeavePage /></ProtectedRoute>} />
           <Route path="payroll"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
           <Route path="payslip"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
-          <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage/></ProtectedRoute>} />
+          <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage forcedScope="all" /></ProtectedRoute>} />
+          <Route path="self-reports"  element={<ProtectedRoute requiredPermission="self_reports"><ReportsPage forcedScope="self" /></ProtectedRoute>} />
 
           {/* Notifications — all roles */}
           <Route path="notifications" element={<ProtectedRoute><NotificationsPage/></ProtectedRoute>} />

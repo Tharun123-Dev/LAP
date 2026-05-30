@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from utils.permissions import make_permission, IsAuthenticatedUser
+from utils.permissions import make_any_permission
 
 
 def csv_response(headers, rows, filename):
@@ -18,21 +18,53 @@ def csv_response(headers, rows, filename):
     return response
 
 
+def has_all_reports(request):
+    return request.user.role in ('superadmin', 'admin') or request.user.has_perm_code('view_reports')
+
+
+def self_reports_only(request):
+    if request.query_params.get('scope') == 'self' and request.user.has_perm_code('self_reports'):
+        return True
+    return not has_all_reports(request)
+
+
+def user_has_any(request, codes):
+    return any(request.user.has_perm_code(code) for code in codes)
+
+
+def make_report_permission(*feature_codes):
+    class ReportPermission(make_any_permission('view_reports', 'self_reports')):
+        def has_permission(self, request, view):
+            if not super().has_permission(request, view):
+                return False
+            if has_all_reports(request):
+                return True
+            return request.user.has_perm_code('self_reports')
+
+    ReportPermission.__name__ = 'ReportPermission_' + '_'.join(feature_codes)
+    return ReportPermission
+
+
 class AttendanceReportView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_report_permission('view_attendance', 'view_team_attendance')]
 
     def get(self, request):
         from attendance.models import AttendanceRecord
         month  = int(request.query_params.get('month', date.today().month))
         year   = int(request.query_params.get('year',  date.today().year))
         emp_id = request.query_params.get('employee')
+        status_filter = request.query_params.get('status')
         fmt    = request.query_params.get('format', 'json')
 
         qs = AttendanceRecord.objects.select_related(
             'employee', 'employee__profile', 'employee__profile__department'
         ).filter(date__year=year, date__month=month)
+        if self_reports_only(request):
+            qs = qs.filter(employee=request.user)
         if emp_id:
             qs = qs.filter(employee_id=emp_id)
+        if status_filter:
+            qs = qs.filter(status=status_filter)
 
         _, mdays = calendar.monthrange(year, month)
         wdays = sum(1 for d in range(1, mdays+1) if date(year, month, d).weekday() < 5)
@@ -80,16 +112,17 @@ class AttendanceReportView(APIView):
             ] for d in data]
             return csv_response(headers, rows, f'attendance_{month}_{year}.csv')
 
-        return Response({'month': month, 'year': year, 'working_days': wdays, 'data': data})
+        return Response({'month': month, 'year': year, 'scope': 'self' if self_reports_only(request) else 'all', 'working_days': wdays, 'data': data})
 
 
 class LeaveReportView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_report_permission('view_leave', 'apply_leave', 'view_all_leave', 'approve_leave')]
 
     def get(self, request):
         from leave.models import LeaveRequest
         year   = int(request.query_params.get('year', date.today().year))
         status = request.query_params.get('status', 'approved')
+        month  = request.query_params.get('month')
         lt_id  = request.query_params.get('leave_type')
         fmt    = request.query_params.get('format', 'json')
 
@@ -97,6 +130,10 @@ class LeaveReportView(APIView):
             'employee', 'employee__profile',
             'leave_type', 'approved_by'
         ).filter(start_date__year=year, status=status)
+        if self_reports_only(request):
+            qs = qs.filter(employee=request.user)
+        if month:
+            qs = qs.filter(start_date__month=int(month))
         if lt_id:
             qs = qs.filter(leave_type_id=lt_id)
 
@@ -144,13 +181,15 @@ class LeaveReportView(APIView):
 
         return Response({
             'year': year, 'status': status,
+            'month': int(month) if month else None,
+            'scope': 'self' if self_reports_only(request) else 'all',
             'summary': list(lt_summary.values()),
             'data': data,
         })
 
 
 class PayrollReportView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_report_permission('view_payslip', 'view_payroll', 'process_payroll')]
 
     def get(self, request):
         from payroll.models import PayrollEntry
@@ -162,6 +201,8 @@ class PayrollReportView(APIView):
             'employee', 'employee__profile',
             'employee__profile__department', 'payroll_run'
         ).filter(payroll_run__month=month, payroll_run__year=year)
+        if self_reports_only(request):
+            entries = entries.filter(employee=request.user)
 
         data = []
         for e in entries:
@@ -224,11 +265,11 @@ class PayrollReportView(APIView):
             ] for d in data]
             return csv_response(headers, rows, f'payroll_{month}_{year}.csv')
 
-        return Response({'month': month, 'year': year, 'totals': totals, 'data': data})
+        return Response({'month': month, 'year': year, 'scope': 'self' if self_reports_only(request) else 'all', 'totals': totals, 'data': data})
 
 
 class HeadcountReportView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_any_permission('view_reports')]
 
     def get(self, request):
         from accounts.models import User
@@ -279,7 +320,7 @@ class HeadcountReportView(APIView):
 
 
 class LopSummaryView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_report_permission('view_payslip', 'view_payroll', 'process_payroll')]
 
     def get(self, request):
         from payroll.models import PayrollEntry
@@ -292,6 +333,8 @@ class LopSummaryView(APIView):
         ).filter(
             payroll_run__month=month, payroll_run__year=year, lop_days__gt=0
         ).order_by('-lop_days')
+        if self_reports_only(request):
+            entries = entries.filter(employee=request.user)
 
         data = []
         for e in entries:
@@ -318,6 +361,7 @@ class LopSummaryView(APIView):
 
         return Response({
             'month': month, 'year': year,
+            'scope': 'self' if self_reports_only(request) else 'all',
             'total_employees_with_lop': len(data),
             'total_lop_days':      sum(d['lop_days']      for d in data),
             'total_lop_deduction': sum(d['lop_deduction'] for d in data),
@@ -326,7 +370,7 @@ class LopSummaryView(APIView):
 
 
 class OvertimeReportView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_report_permission('view_payslip', 'view_payroll', 'process_payroll')]
 
     def get(self, request):
         from payroll.models import PayrollEntry
@@ -339,6 +383,8 @@ class OvertimeReportView(APIView):
         ).filter(
             payroll_run__month=month, payroll_run__year=year, ot_hours__gt=0
         ).order_by('-ot_hours')
+        if self_reports_only(request):
+            entries = entries.filter(employee=request.user)
 
         data = []
         for e in entries:
@@ -365,6 +411,7 @@ class OvertimeReportView(APIView):
 
         return Response({
             'month': month, 'year': year,
+            'scope': 'self' if self_reports_only(request) else 'all',
             'total_employees_with_ot': len(data),
             'total_ot_hours': sum(d['ot_hours'] for d in data),
             'total_ot_pay':   sum(d['ot_pay']   for d in data),
@@ -373,7 +420,7 @@ class OvertimeReportView(APIView):
 
 
 class ReportsDashboardView(APIView):
-    permission_classes = [make_permission('view_reports')]
+    permission_classes = [make_any_permission('view_reports', 'self_reports')]
 
     def get(self, request):
         from attendance.models import AttendanceRecord
@@ -382,16 +429,31 @@ class ReportsDashboardView(APIView):
         from accounts.models import User
 
         today = date.today()
-        month = today.month
-        year  = today.year
+        month = int(request.query_params.get('month', today.month))
+        year  = int(request.query_params.get('year', today.year))
 
         att   = AttendanceRecord.objects.filter(date__year=year, date__month=month)
         leave = LeaveRequest.objects.filter(start_date__year=year, start_date__month=month)
         last_run = PayrollRun.objects.order_by('-year','-month').first()
         pe = PayrollEntry.objects.filter(payroll_run=last_run) if last_run else []
+        if self_reports_only(request):
+            att = att.filter(employee=request.user)
+            leave = leave.filter(employee=request.user)
+            pe = pe.filter(employee=request.user) if last_run else []
+
+        if self_reports_only(request):
+            total_active = 1 if request.user.is_active else 0
+            by_role = {request.user.role: total_active}
+        else:
+            total_active = User.objects.filter(is_active=True).count()
+            by_role = {
+                r: User.objects.filter(role=r, is_active=True).count()
+                for r in ['admin','manager','hr','employee']
+            }
 
         return Response({
             'month': month, 'year': year,
+            'scope': 'self' if self_reports_only(request) else 'all',
             'attendance': {
                 'total_records': att.count(),
                 'present':  att.filter(status='present').count(),
@@ -414,10 +476,7 @@ class ReportsDashboardView(APIView):
                 'employees':   len(pe),
             },
             'headcount': {
-                'total_active': User.objects.filter(is_active=True).count(),
-                'by_role': {
-                    r: User.objects.filter(role=r, is_active=True).count()
-                    for r in ['admin','manager','hr','employee']
-                },
+                'total_active': total_active,
+                'by_role': by_role,
             },
         })

@@ -1,7 +1,7 @@
 // src/api/services/reports.js
 import api from '../axios'
 
-export const getReportsDashboardApi = ()  => api.get('/reports/dashboard/')
+export const getReportsDashboardApi = (p)  => api.get('/reports/dashboard/', { params: p })
 export const getAttendanceReportApi = (p) => api.get('/reports/attendance/', { params: p })
 export const getLeaveReportApi      = (p) => api.get('/reports/leave/',      { params: p })
 export const getPayrollReportApi    = (p) => api.get('/reports/payroll/',    { params: p })
@@ -11,7 +11,10 @@ export const getOvertimeReportApi   = (p) => api.get('/reports/overtime/',  { pa
 
 export const downloadReportCsv = (type, params) => {
   const token = localStorage.getItem('access')
-  const query = new URLSearchParams({ ...params, format: 'csv' }).toString()
+  const cleanParams = Object.fromEntries(
+    Object.entries({ ...params, format: 'csv' }).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  )
+  const query = new URLSearchParams(cleanParams).toString()
   // const url   = `http://localhost:8000/api/reports/${type}/?${query}`
 
   const url   = `https://lap-b9vi.onrender.com/api/reports/${type}/?${query}`

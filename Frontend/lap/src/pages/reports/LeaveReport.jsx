@@ -10,21 +10,30 @@ const STATUS_STYLE = {
   cancelled: { bg: '#f3f4f6', color: '#6b7280' },
 }
 
-export default function LeaveReport() {
+export default function LeaveReport({ scope = 'all' }) {
   const [year,    setYear]    = useState(new Date().getFullYear())
+  const [month,   setMonth]   = useState('')
   const [status,  setStatus]  = useState('approved')
+  const [search,  setSearch]  = useState('')
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { load() }, [year, status])
+  useEffect(() => { load() }, [year, month, status, scope])
 
   const load = () => {
     setLoading(true)
-    getLeaveReportApi({ year, status })
+    getLeaveReportApi({ year, month: month || undefined, status, scope })
       .then(r => setData(r.data))
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false))
   }
+
+  const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const rows = (data?.data || []).filter(r => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [r.emp_code, r.name, r.department, r.leave_type, r.status].some(v => String(v || '').toLowerCase().includes(q))
+  })
 
   return (
     <div>
@@ -32,12 +41,22 @@ export default function LeaveReport() {
         <select value={year} onChange={e => setYear(+e.target.value)} style={sel}>
           {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
+        <select value={month} onChange={e => setMonth(e.target.value)} style={sel}>
+          <option value="">All Months</option>
+          {MONTH_NAMES.slice(1).map((m,i) => <option key={i+1} value={i+1}>{m}</option>)}
+        </select>
         <select value={status} onChange={e => setStatus(e.target.value)} style={sel}>
           {['approved','pending','rejected','cancelled'].map(s => (
             <option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>
           ))}
         </select>
-        <button onClick={() => downloadReportCsv('leave', { year, status })} style={btnDl}>⬇ CSV</button>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, code, dept..."
+          style={{ ...sel, minWidth: '210px' }}
+        />
+        <button onClick={() => downloadReportCsv('leave', { year, month: month || undefined, status, scope })} style={btnDl}>⬇ CSV</button>
       </div>
 
       {data?.summary?.length > 0 && (
@@ -66,7 +85,7 @@ export default function LeaveReport() {
                 </tr>
               </thead>
               <tbody>
-                {data.data.map((r, i) => {
+                {rows.map((r, i) => {
                   const st = STATUS_STYLE[r.status] || STATUS_STYLE.pending
                   return (
                     <tr key={i} style={{ borderTop: '1px solid #f1f5f9', background: i%2===0?'#fff':'#fafafa' }}>

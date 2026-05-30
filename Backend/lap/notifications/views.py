@@ -111,6 +111,9 @@ DEFAULT_SETTINGS = [
     # General
    {'key': 'currency',          'label': 'Currency',          'value': 'INR',  'value_type': 'string', 'category': 'general', 'description': 'Currency symbol used in payroll and reports.'},
 {'key': 'company_logo_url',  'label': 'Company Logo URL',  'value': '',     'value_type': 'string', 'category': 'general', 'description': 'Logo URL shown in payslip and email headers.'},
+    {'key': 'office_latitude',         'label': 'Office Latitude',             'value': '',           'value_type': 'decimal', 'category': 'general', 'description': 'Latitude used for office check-in/check-out location validation.'},
+    {'key': 'office_longitude',        'label': 'Office Longitude',            'value': '',           'value_type': 'decimal', 'category': 'general', 'description': 'Longitude used for office check-in/check-out location validation.'},
+    {'key': 'office_radius_meters',    'label': 'Office Radius (Meters)',      'value': '300',        'value_type': 'integer', 'category': 'general', 'description': 'Allowed distance from office for check-in/check-out.'},
     {'key': 'timezone',                 'label': 'Timezone',                     'value': 'Asia/Kolkata','value_type': 'string',  'category': 'general',    'description': 'System timezone'},
     {'key': 'fiscal_year_start_month',  'label': 'Fiscal Year Start Month',      'value': '4',          'value_type': 'integer',  'category': 'general',    'description': 'Month fiscal year starts (4=April)'},
 ]
@@ -132,6 +135,63 @@ def seed_default_settings():
             obj.value = '1'
             obj.description = s['description']
             obj.save(update_fields=['value', 'description'])
+    try:
+        from attendance.models import OfficeLocation
+        office = OfficeLocation.active()
+        if office:
+            current = {
+                'office_latitude': str(office.latitude),
+                'office_longitude': str(office.longitude),
+                'office_radius_meters': str(office.radius_meters),
+            }
+            for key, value in current.items():
+                setting = SystemSetting.objects.filter(key=key).first()
+                if setting and not str(setting.value).strip():
+                    setting.value = value
+                    setting.save(update_fields=['value'])
+    except Exception:
+        pass
+
+
+def sync_office_location_from_settings(updated_by=None):
+    """
+    Keep attendance.OfficeLocation in sync with General Settings.
+    If latitude/longitude are blank, leave the current office record untouched.
+    """
+    lat = SystemSetting.objects.filter(key='office_latitude').first()
+    lon = SystemSetting.objects.filter(key='office_longitude').first()
+    radius = SystemSetting.objects.filter(key='office_radius_meters').first()
+    if not lat or not lon or not str(lat.value).strip() or not str(lon.value).strip():
+        return None
+
+    try:
+        radius_meters = int(radius.value) if radius and str(radius.value).strip() else 300
+        radius_meters = max(radius_meters, 1)
+        latitude = float(lat.value)
+        longitude = float(lon.value)
+    except (TypeError, ValueError):
+        return None
+
+    from attendance.models import OfficeLocation
+    office = OfficeLocation.objects.filter(is_active=True).first()
+    if not office:
+        OfficeLocation.objects.filter(is_active=True).update(is_active=False)
+        office = OfficeLocation.objects.create(
+            name='Head Office',
+            latitude=latitude,
+            longitude=longitude,
+            radius_meters=radius_meters,
+            is_active=True,
+        )
+    else:
+        office.latitude = latitude
+        office.longitude = longitude
+        office.radius_meters = radius_meters
+        office.is_active = True
+        office.save(update_fields=['latitude', 'longitude', 'radius_meters', 'is_active', 'updated_at'])
+    return office
+
+
 class SystemSettingsView(APIView):
     """GET /api/system-settings/ — list all, POST to bulk update (Admin only)."""
 
@@ -166,6 +226,8 @@ class SystemSettingsView(APIView):
                 updated.append(key)
             except SystemSetting.DoesNotExist:
                 errors.append(f'{key} not found')
+        if {'office_latitude', 'office_longitude', 'office_radius_meters'} & set(updated):
+            sync_office_location_from_settings(request.user)
         return Response({'updated': updated, 'errors': errors})
 
 
@@ -189,4 +251,6 @@ class SystemSettingDetailView(APIView):
         setting.value = str(value)
         setting.updated_by = request.user
         setting.save()
+        if key in ('office_latitude', 'office_longitude', 'office_radius_meters'):
+            sync_office_location_from_settings(request.user)
         return Response(SystemSettingSerializer(setting).data)

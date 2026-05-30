@@ -3,24 +3,31 @@ import { useEffect, useState } from 'react'
 import { getAttendanceReportApi, downloadReportCsv } from '../../api/services/reports'
 import toast from 'react-hot-toast'
 
-export default function AttendanceReport() {
+export default function AttendanceReport({ scope = 'all' }) {
   const now = new Date()
   const [month,   setMonth]   = useState(now.getMonth() + 1)
   const [year,    setYear]    = useState(now.getFullYear())
+  const [status,  setStatus]  = useState('')
+  const [search,  setSearch]  = useState('')
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { load() }, [month, year])
+  useEffect(() => { load() }, [month, year, status, scope])
 
   const load = () => {
     setLoading(true)
-    getAttendanceReportApi({ month, year })
+    getAttendanceReportApi({ month, year, status: status || undefined, scope })
       .then(r => setData(r.data))
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false))
   }
 
   const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+  const rows = (data?.data || []).filter(r => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [r.emp_code, r.name, r.dept, r.role, r.emp_type].some(v => String(v || '').toLowerCase().includes(q))
+  })
 
   return (
     <div>
@@ -32,8 +39,20 @@ export default function AttendanceReport() {
         <select value={year} onChange={e => setYear(+e.target.value)} style={sel}>
           {[2024,2025,2026,2027].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
+        <select value={status} onChange={e => setStatus(e.target.value)} style={sel}>
+          <option value="">All Status</option>
+          {['present','absent','late','half_day','leave','holiday'].map(s => (
+            <option key={s} value={s}>{s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+          ))}
+        </select>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, code, dept..."
+          style={{ ...sel, minWidth: '210px' }}
+        />
         <button
-          onClick={() => downloadReportCsv('attendance', { month, year })}
+          onClick={() => downloadReportCsv('attendance', { month, year, status: status || undefined, scope })}
           style={btnDownload}
         >
           ⬇ Download CSV
@@ -45,7 +64,7 @@ export default function AttendanceReport() {
       {data && (
         <>
           <p style={{ fontSize: '13px', color: '#888', marginBottom: '14px' }}>
-            {MONTH_NAMES[month]} {year} · {data.working_days} working days · {data.data?.length} employees
+            {MONTH_NAMES[month]} {year} · {data.working_days} working days · {rows.length} employees · {scope === 'self' ? 'Self reports' : 'All records'}
           </p>
           <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>
@@ -58,7 +77,7 @@ export default function AttendanceReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.data?.map((r, i) => (
+                  {rows.map((r, i) => (
                     <tr key={r.emp_id} style={{ borderTop: '1px solid #f1f5f9', background: i%2===0?'#fff':'#fafafa' }}>
                       <td style={td}><code style={{ fontSize: '11px', background: '#f3f4f6', padding: '1px 5px', borderRadius: '3px' }}>{r.emp_code}</code></td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.name}</td>

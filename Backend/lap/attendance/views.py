@@ -284,6 +284,21 @@ class OfficeLocationView(APIView):
             name=name, latitude=latitude, longitude=longitude,
             radius_meters=radius_meters, is_active=True,
         )
+        try:
+            from notifications.models import SystemSetting
+            values = {
+                'office_latitude': str(office.latitude),
+                'office_longitude': str(office.longitude),
+                'office_radius_meters': str(office.radius_meters),
+            }
+            for key, value in values.items():
+                setting = SystemSetting.objects.filter(key=key).first()
+                if setting:
+                    setting.value = value
+                    setting.updated_by = request.user
+                    setting.save(update_fields=['value', 'updated_by', 'updated_at'])
+        except Exception:
+            pass
         return Response(OfficeLocationSerializer(office).data, status=status.HTTP_201_CREATED)
 
 

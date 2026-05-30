@@ -29,6 +29,21 @@ def make_permission(code):
     return DynamicPermission
 
 
+def make_any_permission(*codes):
+    class DynamicAnyPermission(BasePermission):
+        perm_codes = codes
+
+        def has_permission(self, request, view):
+            if not request.user or not request.user.is_authenticated:
+                return False
+            if request.user.role in ('superadmin', 'admin'):
+                return True
+            return any(request.user.has_perm_code(code) for code in self.perm_codes)
+
+    DynamicAnyPermission.__name__ = 'PermissionAny_' + '_'.join(codes)
+    return DynamicAnyPermission
+
+
 # Alias kept for backward compat
 HasPermission = make_permission
 

@@ -301,6 +301,21 @@ SETTINGS = [
         description='Company timezone for attendance timestamps.',
     ),
     dict(
+        key='office_latitude', value='', value_type='decimal', category='general',
+        label='Office Latitude',
+        description='Latitude used for office check-in/check-out location validation.',
+    ),
+    dict(
+        key='office_longitude', value='', value_type='decimal', category='general',
+        label='Office Longitude',
+        description='Longitude used for office check-in/check-out location validation.',
+    ),
+    dict(
+        key='office_radius_meters', value='300', value_type='integer', category='general',
+        label='Office Radius (Meters)',
+        description='Allowed distance from office for check-in/check-out. Default is 300 meters.',
+    ),
+    dict(
         key='currency', value='INR', value_type='string', category='general',
         label='Currency',
         description='Currency symbol used in payroll and reports.',

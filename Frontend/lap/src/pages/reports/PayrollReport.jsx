@@ -6,25 +6,32 @@ import toast from 'react-hot-toast'
 const fmt = v => `₹${parseFloat(v||0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
-export default function PayrollReport() {
+export default function PayrollReport({ scope = 'all' }) {
   const now = new Date()
   const [month,   setMonth]   = useState(now.getMonth()+1)
   const [year,    setYear]    = useState(now.getFullYear())
   const [view,    setView]    = useState('register')  // register | lop | ot
+  const [search,  setSearch]  = useState('')
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(false)
 
-  useEffect(() => { load() }, [month, year, view])
+  useEffect(() => { load() }, [month, year, view, scope])
 
   const load = () => {
     setLoading(true)
-    const p = { month, year }
+    const p = { month, year, scope }
     const fn = view === 'lop' ? getLopReportApi : view === 'ot' ? getOvertimeReportApi : getPayrollReportApi
     fn(p)
       .then(r => setData(r.data))
       .catch(() => toast.error('Failed to load'))
       .finally(() => setLoading(false))
   }
+
+  const rows = (data?.data || []).filter(r => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [r.emp_code, r.name, r.department, r.dept, r.emp_type].some(v => String(v || '').toLowerCase().includes(q))
+  })
 
   return (
     <div>
@@ -51,7 +58,13 @@ export default function PayrollReport() {
             </button>
           ))}
         </div>
-        <button onClick={() => downloadReportCsv(view === 'register' ? 'payroll' : view === 'lop' ? 'lop' : 'overtime', { month, year })} style={btnDl}>
+        <input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search name, code, dept..."
+          style={{ ...sel, minWidth: '210px' }}
+        />
+        <button onClick={() => downloadReportCsv(view === 'register' ? 'payroll' : view === 'lop' ? 'lop' : 'overtime', { month, year, scope })} style={btnDl}>
           ⬇ CSV
         </button>
       </div>
@@ -90,7 +103,7 @@ export default function PayrollReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.data.map((r, i) => (
+                  {rows.map((r, i) => (
                     <tr key={i} style={{ borderTop: '1px solid #f1f5f9', background: i%2===0?'#fff':'#fafafa' }}>
                       <td style={td}><code style={{ fontSize:'11px', background:'#f3f4f6', padding:'1px 5px', borderRadius:'3px' }}>{r.emp_code}</code></td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.name}</td>
@@ -125,7 +138,7 @@ export default function PayrollReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.data.map((r, i) => (
+                  {rows.map((r, i) => (
                     <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={td}><code style={{ fontSize:'11px' }}>{r.emp_code}</code></td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.name}</td>
@@ -150,7 +163,7 @@ export default function PayrollReport() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.data.map((r, i) => (
+                  {rows.map((r, i) => (
                     <tr key={i} style={{ borderTop: '1px solid #f1f5f9' }}>
                       <td style={td}><code style={{ fontSize:'11px' }}>{r.emp_code}</code></td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.name}</td>

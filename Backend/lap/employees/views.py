@@ -81,9 +81,18 @@ class CreateEmployeeView(APIView):
     def post(self, request):
         serializer = CreateEmployeeSerializer(data=request.data)
         if serializer.is_valid():
-            serializer.save()
+            user = serializer.save()
+            profile = get_object_or_404(
+                EmployeeProfile.objects.select_related('user', 'department', 'manager'),
+                user=user,
+            )
             return Response(
-                {'message': 'Employee created successfully'},
+                {
+                    'message': 'Employee created successfully',
+                    'user_id': user.id,
+                    'employee_id': profile.id,
+                    'employee': EmployeeProfileSerializer(profile).data,
+                },
                 status=status.HTTP_201_CREATED
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

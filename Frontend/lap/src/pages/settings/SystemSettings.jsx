@@ -96,8 +96,17 @@ const KEY_IMPACT = {
   pt_below_threshold_amount:  ['PT below cutoff', 'Payslip deduction'],
   pt_above_threshold_amount:  ['PT above cutoff', 'Payslip deduction'],
   company_name:               ['🧾 Payslip header', '📧 Email subject'],
+  office_latitude:            ['Attendance check-in location', '300m office validation'],
+  office_longitude:           ['Attendance check-out location', 'Office map marker'],
+  office_radius_meters:       ['Allowed check-in radius', 'Allowed check-out radius'],
   fiscal_year_start_month:    ['💰 Payroll year', '🌴 Fiscal leave year'],
   probation_period_months:    ['🌴 EL eligibility for new employees'],
+}
+
+const PLACEHOLDER = {
+  office_latitude: 'Enter office latitude',
+  office_longitude: 'Enter office longitude',
+  office_radius_meters: '300',
 }
 
 const HIDDEN_KEYS = [
@@ -246,6 +255,7 @@ export default function SystemSettings() {
         value={value}
         type={setting.value_type === 'time' ? 'time' : ['integer', 'decimal'].includes(setting.value_type) ? 'number' : 'text'}
         step={setting.value_type === 'decimal' ? '0.01' : '1'}
+        placeholder={PLACEHOLDER[setting.key] || ''}
         onChange={e => canEdit && !isFixedPayrollLock && handleChange(setting.key, e.target.value)}
         disabled={!canEdit || isFixedPayrollLock}
         style={{
@@ -439,7 +449,7 @@ export default function SystemSettings() {
       )}
       {saved && (
         <div style={alertStyle('#dcfce7', '#86efac', '#16a34a')}>
-          ✓ Settings saved! Changes will reflect in payroll runs, calendar, and leave forms immediately.
+          ✓ Settings saved! Office location changes reflect in check-in/check-out immediately.
         </div>
       )}
       {hasChanges && (

@@ -6,27 +6,29 @@ import toast from 'react-hot-toast'
 const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmt = v => `₹${parseFloat(v||0).toLocaleString('en-IN')}`
 
-export default function ReportsDashboard() {
+export default function ReportsDashboard({ canViewAllReports = false, canSelfReports = false, scope = 'all' }) {
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     setLoading(true)
-    getReportsDashboardApi()
+    getReportsDashboardApi({ scope })
       .then(r => setData(r.data))
       .catch(() => toast.error('Failed to load report summary'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [scope])
 
   if (loading) return <p style={{ color: '#888' }}>Loading...</p>
   if (!data)   return null
 
   const { attendance, leave, payroll, headcount } = data
+  const canShowSelf = () => canSelfReports
 
   const sections = [
     {
-      title: `Attendance — ${MONTH_NAMES[data.month]} ${data.year}`,
+      title: `Attendance - ${MONTH_NAMES[data.month]} ${data.year}`,
       color: '#10b981',
+      show: canViewAllReports || canShowSelf(),
       items: [
         { label: 'Total Records', value: attendance.total_records, raw: true },
         { label: 'Present',       value: attendance.present,       raw: true },
@@ -36,8 +38,9 @@ export default function ReportsDashboard() {
       ],
     },
     {
-      title: `Leave — ${MONTH_NAMES[data.month]} ${data.year}`,
+      title: `Leave - ${MONTH_NAMES[data.month]} ${data.year}`,
       color: '#f59e0b',
+      show: canViewAllReports || canShowSelf(),
       items: [
         { label: 'Total Requests', value: leave.total_requests, raw: true },
         { label: 'Approved',       value: leave.approved,       raw: true },
@@ -47,9 +50,10 @@ export default function ReportsDashboard() {
     },
     {
       title: payroll.last_month
-        ? `Payroll — ${MONTH_NAMES[payroll.last_month]} ${payroll.last_year}`
+        ? `Payroll - ${MONTH_NAMES[payroll.last_month]} ${payroll.last_year}`
         : 'Payroll',
       color: '#6366f1',
+      show: canViewAllReports || canShowSelf(),
       items: [
         { label: 'Total Gross',  value: fmt(payroll.total_gross), raw: true },
         { label: 'Total Net',    value: fmt(payroll.total_net),   raw: true },
@@ -60,6 +64,7 @@ export default function ReportsDashboard() {
     {
       title: 'Headcount',
       color: '#0ea5e9',
+      show: canViewAllReports && scope !== 'self',
       items: [
         { label: 'Total Active', value: headcount.total_active, raw: true },
         ...Object.entries(headcount.by_role || {}).map(([role, count]) => ({
@@ -68,7 +73,7 @@ export default function ReportsDashboard() {
         })),
       ],
     },
-  ]
+  ].filter(section => section.show)
 
   return (
     <div>

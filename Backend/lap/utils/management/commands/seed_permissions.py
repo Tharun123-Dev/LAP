@@ -38,6 +38,7 @@ ALL_PERMISSIONS = [
     ('view_payslip',         'View own payslip',               'payroll'),
 
     ('view_reports',         'View reports',                   'reports'),
+    ('self_reports',         'View own reports',               'reports'),
     ('export_reports',       'Export reports',                 'reports'),
 ]
 
