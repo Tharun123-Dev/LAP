@@ -5,6 +5,7 @@ import supportTicketsService from '../../api/services/supportTickets'
 
 const priorities = ['low', 'medium', 'high', 'urgent']
 const statuses = ['open', 'in_progress', 'waiting_user', 'resolved', 'closed', 'reopened']
+const priorityRank = { urgent: 4, high: 3, medium: 2, low: 1 }
 
 const card = { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '16px' }
 const input = { width: '100%', padding: '10px 12px', border: '1px solid #d1d5db', borderRadius: '7px', fontSize: '13px', boxSizing: 'border-box' }
@@ -22,6 +23,31 @@ const button = (bg = '#2563eb', color = '#fff', disabled = false) => ({
 
 function label(value) {
   return String(value || '').replaceAll('_', ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
+function formatDateTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString()
+}
+
+function timeAgo(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+
+  const seconds = Math.max(1, Math.floor((Date.now() - date.getTime()) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
 }
 
 function Badge({ children, tone = '#2563eb' }) {
@@ -132,6 +158,10 @@ function TicketList({ tickets, selectedId, onSelect, empty }) {
             <Badge tone="#059669">{label(ticket.status)}</Badge>
             <Badge tone="#6b7280">{ticket.issue_type_name}</Badge>
           </div>
+          <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap', fontSize: '11px', color: '#6b7280' }}>
+            <span>Raised {timeAgo(ticket.created_at)}</span>
+            <span>Updated {timeAgo(ticket.updated_at || ticket.created_at)}</span>
+          </div>
         </button>
       ))}
     </div>
@@ -181,7 +211,8 @@ function TicketDetail({ ticket, canManage, readOnly, onAction, updating }) {
         <div><strong>Requester:</strong> {ticket.requester_name}</div>
         <div><strong>Assigned:</strong> {ticket.assigned_to_name || 'Not assigned'}</div>
         <div><strong>Resolved by:</strong> {ticket.resolved_by_name || '-'}</div>
-        <div><strong>Created:</strong> {new Date(ticket.created_at).toLocaleString()}</div>
+        <div><strong>Created:</strong> {formatDateTime(ticket.created_at)}</div>
+        <div><strong>Last update:</strong> {formatDateTime(ticket.updated_at || ticket.created_at)}</div>
       </div>
 
       <div style={{ display: 'grid', gap: '8px' }}>
@@ -239,6 +270,8 @@ export default function SupportTicketsPage() {
   const [summary, setSummary] = useState({})
   const [selected, setSelected] = useState(null)
   const [filters, setFilters] = useState({ status: '', priority: '', issue_type: '' })
+  const [ticketSearch, setTicketSearch] = useState('')
+  const [ticketSort, setTicketSort] = useState('latest')
   const [form, setForm] = useState({ issue_type: '', priority: 'medium', subject: '', description: '' })
   const [typeForm, setTypeForm] = useState({ name: '', code: '', description: '' })
   const [submitting, setSubmitting] = useState(false)
@@ -246,7 +279,28 @@ export default function SupportTicketsPage() {
   const [savingType, setSavingType] = useState(false)
   const [disablingTypeId, setDisablingTypeId] = useState(null)
 
-  const visibleTickets = useMemo(() => (tab === 'all' ? allTickets : myTickets), [tab, allTickets, myTickets])
+  const visibleTickets = useMemo(() => {
+    const search = ticketSearch.trim().toLowerCase()
+    const source = tab === 'all' ? allTickets : myTickets
+    const filtered = search
+      ? source.filter((ticket) => [
+        ticket.ticket_no,
+        ticket.subject,
+        ticket.description,
+        ticket.issue_type_name,
+        ticket.status,
+        ticket.priority,
+        ticket.requester_name,
+      ].some((value) => String(value || '').toLowerCase().includes(search)))
+      : source
+
+    return [...filtered].sort((first, second) => {
+      if (ticketSort === 'oldest') return new Date(first.created_at) - new Date(second.created_at)
+      if (ticketSort === 'priority') return (priorityRank[second.priority] || 0) - (priorityRank[first.priority] || 0)
+      if (ticketSort === 'updated') return new Date(second.updated_at || second.created_at) - new Date(first.updated_at || first.created_at)
+      return new Date(second.created_at) - new Date(first.created_at)
+    })
+  }, [tab, allTickets, myTickets, ticketSearch, ticketSort])
 
   const load = async () => {
     const [typeRes, summaryRes] = await Promise.all([
@@ -414,7 +468,31 @@ export default function SupportTicketsPage() {
                 </select>
               </div>
             )}
-            <TicketList tickets={visibleTickets} selectedId={selected?.id} onSelect={setSelected} empty={tab === 'all' ? 'No tickets for this filter.' : 'No tickets raised yet.'} />
+            <div style={{ ...card, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px', alignItems: 'center' }}>
+              <input
+                value={ticketSearch}
+                onChange={(e) => setTicketSearch(e.target.value)}
+                style={input}
+                placeholder="Search ticket no, subject, issue, status"
+              />
+              <select value={ticketSort} onChange={(e) => setTicketSort(e.target.value)} style={input}>
+                <option value="latest">Latest first</option>
+                <option value="updated">Recently updated</option>
+                <option value="priority">High priority first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setTicketSearch('')
+                  setTicketSort('latest')
+                }}
+                style={button('#f3f4f6', '#374151')}
+              >
+                Clear
+              </button>
+            </div>
+            <TicketList tickets={visibleTickets} selectedId={selected?.id} onSelect={setSelected} empty={tab === 'all' ? 'No tickets for this filter or search.' : 'No tickets raised yet.'} />
           </div>
           <TicketDetail ticket={selected} canManage={tab === 'all' && canManage} readOnly={tab === 'my'} onAction={runAction} updating={updating} />
         </div>
