@@ -6,6 +6,7 @@ from rest_framework import status, generics
 from django.shortcuts import get_object_or_404
 
 from utils.permissions import make_permission, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from accounts.models import User
 from .models import LeaveType, LeaveBalance, LeaveRequest
 from .serializers import LeaveTypeSerializer, LeaveBalanceSerializer, LeaveRequestSerializer
@@ -87,7 +88,7 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
     serializer_class = LeaveTypeSerializer
 
     def get_queryset(self):
-        return LeaveType.objects.filter(is_active=True)
+        return LeaveType.objects.filter(is_active=True, tenant_id=get_tenant_id(self.request))
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -96,7 +97,7 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
 
     def perform_create(self, serializer):
         """After creating a new leave type, auto-create balance rows for all employees."""
-        leave_type = serializer.save()
+        leave_type = serializer.save(tenant_id=get_tenant_id(self.request))
         year       = date.today().year
         result     = sync_balances_for_leave_type(leave_type, year)
         # Store sync result so create() can include it in the response
@@ -113,8 +114,10 @@ class LeaveTypeListCreateView(generics.ListCreateAPIView):
 
 
 class LeaveTypeDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset         = LeaveType.objects.all()
     serializer_class = LeaveTypeSerializer
+
+    def get_queryset(self):
+        return LeaveType.objects.filter(tenant_id=get_tenant_id(self.request))
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -205,7 +208,7 @@ class SyncLeaveBalancesView(APIView):
             return Response({'error': 'leave_type_id is required'}, status=400)
 
         try:
-            lt = LeaveType.objects.get(pk=lt_id)
+            lt = LeaveType.objects.get(pk=lt_id, tenant_id=get_tenant_id(request))
         except LeaveType.DoesNotExist:
             return Response({'error': 'Leave type not found'}, status=404)
 
@@ -291,7 +294,8 @@ class ApplyLeaveView(APIView):
 
             lt = LeaveType.objects.get(
                 pk=lt_id,
-                is_active=True
+                is_active=True,
+                tenant_id=get_tenant_id(request),
             )
 
         except LeaveType.DoesNotExist:
@@ -407,6 +411,7 @@ class ApplyLeaveView(APIView):
 
                 this_month_used = LeaveRequest.objects.filter(
                     employee=request.user,
+                    tenant_id=get_tenant_id(request),
                     leave_type=lt,
                     start_date__year=start.year,
                     start_date__month=start.month,
@@ -439,6 +444,7 @@ class ApplyLeaveView(APIView):
 
         overlap = LeaveRequest.objects.filter(
             employee=request.user,
+            tenant_id=get_tenant_id(request),
             status__in=['pending', 'approved'],
             start_date__lte=end,
             end_date__gte=start,
@@ -458,6 +464,7 @@ class ApplyLeaveView(APIView):
         # ─────────────────────────────────────────────
 
         leave = LeaveRequest.objects.create(
+            tenant_id=get_tenant_id(request),
             employee=request.user,
             leave_type=lt,
             start_date=start,
@@ -494,7 +501,8 @@ class MyLeaveRequestsView(APIView):
     def get(self, request):
         status_filter = request.query_params.get('status')
         qs = LeaveRequest.objects.filter(
-            employee=request.user
+            employee=request.user,
+            tenant_id=get_tenant_id(request),
         ).select_related('leave_type', 'approved_by')
         if status_filter:
             qs = qs.filter(status=status_filter)
@@ -507,7 +515,12 @@ class CancelLeaveView(APIView):
     permission_classes = [make_permission('cancel_leave')]
 
     def post(self, request, pk):
-        leave = get_object_or_404(LeaveRequest, pk=pk, employee=request.user)
+        leave = get_object_or_404(
+            LeaveRequest,
+            pk=pk,
+            employee=request.user,
+            tenant_id=get_tenant_id(request),
+        )
 
         if leave.status not in ['pending', 'approved']:
             return Response({'error': f'Cannot cancel a {leave.status} request'}, status=400)
@@ -558,7 +571,7 @@ class AllLeaveRequestsView(APIView):
 
         qs = LeaveRequest.objects.select_related(
             'employee', 'employee__profile', 'leave_type', 'approved_by'
-        ).all()
+        ).filter(tenant_id=get_tenant_id(request))
 
         qs = qs.exclude(employee=request.user)
 
@@ -583,7 +596,9 @@ class LeaveActionView(APIView):
             return Response({'error': 'action must be approve or reject'}, status=400)
 
         leave = get_object_or_404(
-            LeaveRequest.objects.select_related('leave_type', 'employee'), pk=pk
+            LeaveRequest.objects.select_related('leave_type', 'employee'),
+            pk=pk,
+            tenant_id=get_tenant_id(request),
         )
 
         if leave.status != 'pending':
@@ -614,7 +629,10 @@ class LeaveActionView(APIView):
         year = leave.start_date.year
         try:
             balance = LeaveBalance.objects.get(
-                employee=leave.employee, leave_type=leave.leave_type, year=year
+                employee=leave.employee,
+                leave_type=leave.leave_type,
+                year=year,
+                tenant_id=get_tenant_id(request),
             )
             balance.pending = max(balance.pending - leave.days, 0)
             if action == 'approve':
@@ -637,6 +655,7 @@ class LeaveActionView(APIView):
                 if not _is_wknd(cur):
                     AttendanceRecord.objects.update_or_create(
                         employee=leave.employee, date=cur,
+                        tenant_id=get_tenant_id(request),
                         defaults={'status': att_status, 'note': f'Leave approved: {leave.leave_type.name}'},
                     )
                 cur += timedelta(days=1)
@@ -654,6 +673,7 @@ class LeaveActionView(APIView):
                 if not _is_wknd(cur):
                     AttendanceRecord.objects.update_or_create(
                         employee=leave.employee, date=cur,
+                        tenant_id=get_tenant_id(request),
                         defaults={'status': att_status, 'note': f'Leave rejected: {leave.leave_type.name}'},
                     )
                 cur += timedelta(days=1)
@@ -671,7 +691,9 @@ class LeavePriorUsageView(APIView):
 
     def get(self, request, pk):
         leave = get_object_or_404(
-            LeaveRequest.objects.select_related('employee', 'leave_type'), pk=pk
+            LeaveRequest.objects.select_related('employee', 'leave_type'),
+            pk=pk,
+            tenant_id=get_tenant_id(request),
         )
         month      = leave.start_date.month
         year       = leave.start_date.year
@@ -680,6 +702,7 @@ class LeavePriorUsageView(APIView):
 
         prior_qs = LeaveRequest.objects.filter(
             employee=employee, leave_type=leave_type,
+            tenant_id=get_tenant_id(request),
             start_date__year=year, start_date__month=month,
             status__in=['approved', 'pending'],
         ).exclude(pk=pk).order_by('start_date')
@@ -749,7 +772,7 @@ class LeavePolicySettingsView(APIView):
             get_leave_is_paid,
             get_leave_carry_forward,
         )
-        leave_types = LeaveType.objects.filter(is_active=True)
+        leave_types = LeaveType.objects.filter(is_active=True, tenant_id=get_tenant_id(request))
         result = []
         for lt in leave_types:
             code = lt.code
@@ -809,7 +832,7 @@ class LeavePolicySettingsView(APIView):
             return Response({'error': 'leave_type_id required'}, status=400)
 
         try:
-            lt = LeaveType.objects.get(pk=lt_id)
+            lt = LeaveType.objects.get(pk=lt_id, tenant_id=get_tenant_id(request))
         except LeaveType.DoesNotExist:
             return Response({'error': 'Leave type not found'}, status=404)
 
@@ -825,6 +848,7 @@ class LeavePolicySettingsView(APIView):
             # sync to system setting
             key = f'{code}_days_per_year'
             obj, _ = SystemSetting.objects.get_or_create(
+                tenant_id=get_tenant_id(request),
                 key=key,
                 defaults={
                     'value': str(val), 'value_type': 'integer',
@@ -843,6 +867,7 @@ class LeavePolicySettingsView(APIView):
             updated_model_fields.append('min_notice_days')
             key = f'{code}_advance_notice_days'
             obj, _ = SystemSetting.objects.get_or_create(
+                tenant_id=get_tenant_id(request),
                 key=key,
                 defaults={
                     'value': str(val), 'value_type': 'integer',
@@ -861,6 +886,7 @@ class LeavePolicySettingsView(APIView):
             updated_model_fields.append('is_paid')
             key = f'{code}_is_paid'
             obj, _ = SystemSetting.objects.get_or_create(
+                tenant_id=get_tenant_id(request),
                 key=key,
                 defaults={
                     'value': str(val).lower(), 'value_type': 'boolean',
@@ -879,6 +905,7 @@ class LeavePolicySettingsView(APIView):
             updated_model_fields.append('carry_forward')
             key = f'{code}_carry_forward'
             obj, _ = SystemSetting.objects.get_or_create(
+                tenant_id=get_tenant_id(request),
                 key=key,
                 defaults={
                     'value': str(val).lower(), 'value_type': 'boolean',
@@ -922,7 +949,7 @@ class DeleteLeaveTypeView(APIView):
     def delete(self, request, pk):
 
         try:
-            lt = LeaveType.objects.get(pk=pk)
+            lt = LeaveType.objects.get(pk=pk, tenant_id=get_tenant_id(request))
 
         except LeaveType.DoesNotExist:
 

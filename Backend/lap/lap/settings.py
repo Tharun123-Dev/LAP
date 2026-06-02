@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'utils',
     'reports',
     'notifications',
+    'support_tickets',
 ]
 
 AUTH_USER_MODEL = 'accounts.User'

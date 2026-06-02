@@ -14,6 +14,7 @@ class Permission(models.Model):
         ('users',       'Users'),
         ('settings',    'Settings'),
         ('notifications','Notifications'),
+        ('support_tickets', 'Support Tickets'),
     ]
 
     code        = models.CharField(max_length=100, unique=True)

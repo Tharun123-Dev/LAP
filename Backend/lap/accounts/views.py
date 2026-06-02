@@ -6,6 +6,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 # ✅ make_permission only — no HasPermission
 from utils.permissions import make_permission, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from .models import User
 from .serializers import MyTokenObtainPairSerializer, CreateUserSerializer, UserSerializer
 
@@ -19,7 +20,7 @@ class CreateUserView(generics.CreateAPIView):
     permission_classes = [make_permission('create_user')]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        serializer.save(created_by=self.request.user, tenant_id=get_tenant_id(self.request))
 
 
 class ListUsersView(generics.ListAPIView):
@@ -28,7 +29,7 @@ class ListUsersView(generics.ListAPIView):
 
     def get_queryset(self):
         role = self.request.query_params.get('role')
-        qs = User.objects.all().order_by('-date_joined')
+        qs = User.objects.filter(tenant_id=get_tenant_id(self.request)).order_by('-date_joined')
         if role:
             qs = qs.filter(role=role)
         return qs
@@ -42,9 +43,11 @@ class MeView(APIView):
 
 
 class UpdateUserView(generics.RetrieveUpdateAPIView):
-    queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [make_permission('edit_user')]
+
+    def get_queryset(self):
+        return User.objects.filter(tenant_id=get_tenant_id(self.request))
 
 # ADD to accounts/views.py
 

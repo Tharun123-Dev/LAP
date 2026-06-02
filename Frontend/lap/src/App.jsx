@@ -15,6 +15,7 @@ import LeavePage         from './pages/leave/LeavePage'
 import PayrollPage       from './pages/payroll/PayrollPage'
 import ReportsPage from './pages/reports/ReportsMain';
 import NotificationsPage from './pages/notifications/NotificationsMain';
+import SupportTicketsPage from './pages/support/SupportTicketsPage'
 import ProfileSettings   from './pages/settings/ProfileSettings'
 import SystemSettings    from './pages/settings/SystemSettings'
 
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="leave"         element={<ProtectedRoute requiredPermission="view_leave"><LeavePage /></ProtectedRoute>} />
           <Route path="payroll"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
           <Route path="payslip"       element={<ProtectedRoute requiredPermission="view_payslip"><PayrollPage /></ProtectedRoute>} />
+          <Route path="support-tickets" element={<ProtectedRoute requiredAny={['raise_support_ticket', 'view_support_tickets', 'manage_support_tickets']}><SupportTicketsPage /></ProtectedRoute>} />
           <Route path="reports"       element={<ProtectedRoute requiredPermission="view_reports"><ReportsPage forcedScope="all" /></ProtectedRoute>} />
           <Route path="self-reports"  element={<ProtectedRoute requiredPermission="self_reports"><ReportsPage forcedScope="self" /></ProtectedRoute>} />
 

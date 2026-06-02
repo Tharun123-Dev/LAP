@@ -101,6 +101,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
 
         permission_overrides = validated_data.pop('permission_overrides', [])
         custom_role_id = validated_data.pop('custom_role', None)
+        created_by = validated_data.pop('created_by', None)
 
         user = User(
             username      = validated_data['username'],
@@ -109,6 +110,8 @@ class CreateEmployeeSerializer(serializers.Serializer):
             last_name     = validated_data['last_name'],
             role          = validated_data['role'],
             employee_type = validated_data['employee_type'],
+            tenant_id     = getattr(created_by, 'tenant_id', 'default') or 'default',
+            created_by    = created_by,
         )
         if custom_role_id:
             try:
@@ -120,6 +123,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
 
         EmployeeProfile.objects.create(
             user          = user,
+            tenant_id     = user.tenant_id,
             emp_code      = validated_data['emp_code'],
             department    = validated_data.get('department'),
             designation   = validated_data.get('designation', 'other'),

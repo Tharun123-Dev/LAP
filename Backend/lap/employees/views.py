@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 
 from utils.permissions import make_permission, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from accounts.models import User
 from .models import Department, EmployeeProfile
 from .serializers import (
@@ -17,8 +18,10 @@ from .serializers import (
 # ─── DEPARTMENT VIEWS ────────────────────────────────────────────────────────
 
 class DepartmentListCreateView(generics.ListCreateAPIView):
-    queryset         = Department.objects.all()
     serializer_class = DepartmentSerializer
+
+    def get_queryset(self):
+        return Department.objects.filter(tenant_id=get_tenant_id(self.request))
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -26,12 +29,14 @@ class DepartmentListCreateView(generics.ListCreateAPIView):
         return [make_permission('create_department')()]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        serializer.save(created_by=self.request.user, tenant_id=get_tenant_id(self.request))
 
 
 class DepartmentDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset         = Department.objects.all()
     serializer_class = DepartmentSerializer
+
+    def get_queryset(self):
+        return Department.objects.filter(tenant_id=get_tenant_id(self.request))
 
     def get_permissions(self):
         if self.request.method == 'GET':
@@ -50,7 +55,7 @@ class EmployeeListView(generics.ListAPIView):
     def get_queryset(self):
         qs = EmployeeProfile.objects.select_related(
             'user', 'department', 'manager'
-        ).all()
+        ).filter(user__tenant_id=get_tenant_id(self.request))
         dept   = self.request.query_params.get('department')
         role   = self.request.query_params.get('role')
         active = self.request.query_params.get('active')
@@ -81,7 +86,7 @@ class CreateEmployeeView(APIView):
     def post(self, request):
         serializer = CreateEmployeeSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
+            user = serializer.save(created_by=request.user)
             profile = get_object_or_404(
                 EmployeeProfile.objects.select_related('user', 'department', 'manager'),
                 user=user,
@@ -104,7 +109,8 @@ class EmployeeDetailView(APIView):
     def get(self, request, pk):
         profile = get_object_or_404(
             EmployeeProfile.objects.select_related('user', 'department', 'manager'),
-            pk=pk
+            pk=pk,
+            user__tenant_id=get_tenant_id(request),
         )
         return Response(EmployeeProfileSerializer(profile).data)
 
@@ -113,7 +119,7 @@ class UpdateEmployeeView(APIView):
     permission_classes = [make_permission('edit_employee')]
 
     def patch(self, request, pk):
-        profile = get_object_or_404(EmployeeProfile, pk=pk)
+        profile = get_object_or_404(EmployeeProfile, pk=pk, user__tenant_id=get_tenant_id(request))
         user    = profile.user
 
         # Update User fields if provided
@@ -143,7 +149,7 @@ class UpdateEmployeeView(APIView):
 
         updated = EmployeeProfile.objects.select_related(
             'user', 'department', 'manager'
-        ).get(pk=pk)
+        ).get(pk=pk, user__tenant_id=get_tenant_id(request))
         return Response(EmployeeProfileSerializer(updated).data)
 
 
@@ -151,7 +157,7 @@ class DeactivateEmployeeView(APIView):
     permission_classes = [make_permission('delete_employee')]
 
     def post(self, request, pk):
-        profile = get_object_or_404(EmployeeProfile, pk=pk)
+        profile = get_object_or_404(EmployeeProfile, pk=pk, user__tenant_id=get_tenant_id(request))
         profile.user.is_active = False
         profile.user.save()
         return Response({'message': f'{profile.emp_code} deactivated successfully'})
@@ -165,5 +171,7 @@ class ManagerListView(APIView):
         managers = User.objects.filter(
             role__in=['manager', 'hr', 'admin'],
             is_active=True
+        ).filter(
+            tenant_id=get_tenant_id(request)
         ).values('id', 'username', 'first_name', 'last_name', 'role')
         return Response(list(managers))

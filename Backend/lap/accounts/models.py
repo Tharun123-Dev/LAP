@@ -3,7 +3,21 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 
 
+class Tenant(models.Model):
+    code = models.CharField(max_length=64, unique=True)
+    name = models.CharField(max_length=150)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
 class CustomRole(models.Model):
+    tenant_id = models.CharField(max_length=64, default='default', db_index=True)
     name        = models.CharField(max_length=50, unique=True)
     display_name = models.CharField(max_length=100)
     level       = models.IntegerField(default=10)
@@ -35,6 +49,7 @@ class User(AbstractUser):
     ]
 
     role          = models.CharField(max_length=20, choices=BASE_ROLES, default='employee')
+    tenant_id     = models.CharField(max_length=64, default='default', db_index=True)
     custom_role   = models.ForeignKey(
         CustomRole, null=True, blank=True,
         on_delete=models.SET_NULL, related_name='users'

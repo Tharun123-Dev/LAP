@@ -8,6 +8,7 @@ from django.db import models
 from accounts.models import User
 
 class SalaryStructure(models.Model):
+    tenant_id = models.CharField(max_length=64, default='default', db_index=True)
 
     employee = models.ForeignKey(
         User,
@@ -103,6 +104,11 @@ class SalaryStructure(models.Model):
             f"{self.effective_date} | "
             f"CTC {self.ctc}"
         )
+
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)
 
     @property
     def monthly_ctc(self):
@@ -205,6 +211,7 @@ class PayrollRun(models.Model):
         ('locked',    'Locked'),
     ]
 
+    tenant_id    = models.CharField(max_length=64, default='default', db_index=True)
     month        = models.IntegerField()
     year         = models.IntegerField()
     period_start = models.DateField(null=True, blank=True)
@@ -223,7 +230,7 @@ class PayrollRun(models.Model):
     locked_at    = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ['month', 'year', 'period_start', 'period_end']
+        unique_together = ['tenant_id', 'month', 'year', 'period_start', 'period_end']
         ordering        = ['-year', '-month', '-period_start']
 
     def __str__(self):
@@ -247,6 +254,7 @@ class PayrollRun(models.Model):
 
 
 class PayrollEntry(models.Model):
+    tenant_id       = models.CharField(max_length=64, default='default', db_index=True)
     payroll_run    = models.ForeignKey(PayrollRun, on_delete=models.CASCADE, related_name='entries')
     employee       = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payroll_entries')
     salary_structure = models.ForeignKey(SalaryStructure, null=True, on_delete=models.SET_NULL)
@@ -297,6 +305,14 @@ class PayrollEntry(models.Model):
     def __str__(self):
         return f"{self.employee.username} | {self.payroll_run}"
 
+    def save(self, *args, **kwargs):
+        if not self.tenant_id or self.tenant_id == 'default':
+            if self.payroll_run_id:
+                self.tenant_id = self.payroll_run.tenant_id
+            elif self.employee_id:
+                self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)
+
 
 class PayrollAdjustment(models.Model):
     TYPE_CHOICES = [
@@ -306,6 +322,7 @@ class PayrollAdjustment(models.Model):
         ('arrear',      'Arrear'),
     ]
 
+    tenant_id     = models.CharField(max_length=64, default='default', db_index=True)
     payroll_entry = models.ForeignKey(PayrollEntry, on_delete=models.CASCADE, related_name='adjustments')
     type         = models.CharField(max_length=20, choices=TYPE_CHOICES)
     amount       = models.DecimalField(max_digits=10, decimal_places=2)
@@ -318,6 +335,11 @@ class PayrollAdjustment(models.Model):
     def __str__(self):
         return f"{self.type} | {self.amount} | {self.payroll_entry.employee.username}"
 
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.payroll_entry_id:
+            self.tenant_id = self.payroll_entry.tenant_id
+        super().save(*args, **kwargs)
+
 
 class PayrollCarryForwardAdjustment(models.Model):
     STATUS_CHOICES = [
@@ -326,6 +348,7 @@ class PayrollCarryForwardAdjustment(models.Model):
         ('ignored', 'Ignored'),
     ]
 
+    tenant_id = models.CharField(max_length=64, default='default', db_index=True)
     employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payroll_carry_forward_adjustments')
     source_run = models.ForeignKey(
         PayrollRun, null=True, blank=True,
@@ -352,3 +375,8 @@ class PayrollCarryForwardAdjustment(models.Model):
 
     def __str__(self):
         return f"{self.employee.username} | {self.source_month}/{self.source_year} | {self.amount} | {self.status}"
+
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)

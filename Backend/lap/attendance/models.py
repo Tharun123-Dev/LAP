@@ -13,6 +13,7 @@ class OfficeLocation(models.Model):
     Admins can update latitude/longitude dynamically from the admin panel
     or via API — no code change needed.
     """
+    tenant_id   = models.CharField(max_length=64, default='default', db_index=True)
     name        = models.CharField(max_length=100, default='Head Office')
     latitude    = models.DecimalField(max_digits=9, decimal_places=6)
     longitude   = models.DecimalField(max_digits=9, decimal_places=6)
@@ -66,6 +67,7 @@ class AttendanceRecord(models.Model):
         ('night', 'Night Shift'),
     ]
 
+    tenant_id    = models.CharField(max_length=64, default='default', db_index=True)
     employee     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='attendance_records')
     date         = models.DateField()
     shift_type   = models.CharField(max_length=10, choices=SHIFT_CHOICES, default='day')
@@ -106,6 +108,11 @@ class AttendanceRecord(models.Model):
     def __str__(self):
         return f"{self.employee.username} | {self.date} | {self.shift_type} | {self.status}"
 
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)
+
     def calculate_hours(self):
         if not self.check_in or not self.check_out:
             return 0
@@ -143,6 +150,7 @@ class AttendanceRegularization(models.Model):
         ('rejected', 'Rejected'),
     ]
 
+    tenant_id    = models.CharField(max_length=64, default='default', db_index=True)
     attendance   = models.OneToOneField(
         AttendanceRecord, on_delete=models.CASCADE,
         related_name='regularization'
@@ -166,17 +174,24 @@ class AttendanceRegularization(models.Model):
     def __str__(self):
         return f"{self.employee.username} | {self.attendance.date} | {self.status}"
 
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)
+
 
 # ── HOLIDAY ───────────────────────────────────────────────────────────────────
 
 class Holiday(models.Model):
-    date        = models.DateField(unique=True)
+    tenant_id   = models.CharField(max_length=64, default='default', db_index=True)
+    date        = models.DateField()
     name        = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['date']
+        unique_together = ['tenant_id', 'date']
 
     def __str__(self):
         return f"{self.date} — {self.name}"

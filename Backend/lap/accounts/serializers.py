@@ -10,6 +10,7 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         token = super().get_token(user)
         token['role'] = user.role
         token['employee_type'] = user.employee_type
+        token['tenant_id'] = user.tenant_id
         token['name'] = user.get_full_name() or user.username
         token['email'] = user.email
         token['permissions'] = user.get_permissions_list()  # from DB
@@ -41,7 +42,7 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'email', 'first_name', 'last_name',
-            'role', 'employee_type', 'is_active', 'permissions'
+            'role', 'tenant_id', 'employee_type', 'is_active', 'permissions'
         ]
 
     def get_permissions(self, obj):

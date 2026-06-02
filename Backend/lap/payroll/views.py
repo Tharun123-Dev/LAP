@@ -10,6 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.db import transaction
 
 from utils.permissions import make_permission, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from accounts.models import User
 from .models import SalaryStructure, PayrollRun, PayrollEntry, PayrollAdjustment
 from .serializers import (
@@ -31,11 +32,11 @@ from attendance.settings_helper import (
 )
 
 
-def _get_general(key, default=''):
+def _get_general(key, default='', tenant_id='default'):
     """Read a general system setting directly."""
     try:
         from notifications.models import SystemSetting
-        s = SystemSetting.objects.filter(key=key).first()
+        s = SystemSetting.objects.filter(tenant_id=tenant_id, key=key).first()
         if s:
             return s.get_value()
     except Exception:
@@ -79,7 +80,7 @@ class PayrollSettingsDefaultsView(APIView):
             'working_days_per_month':   get_working_days_per_month(),
             # General settings
             'company_name':             get_company_name(),
-            'company_logo_url':         str(_get_general('company_logo_url', '')),
+            'company_logo_url':         str(_get_general('company_logo_url', '', get_tenant_id(request))),
             'currency':                 get_currency(),
             'fiscal_year_start_month':  float(get_fiscal_year_start_month()),
             'probation_period_months':  get_probation_months(),
@@ -184,7 +185,7 @@ class SalaryStructureListView(APIView):
         emp_id = request.query_params.get('employee')
         qs = SalaryStructure.objects.select_related(
             'employee', 'employee__profile'
-        ).filter(is_active=True)
+        ).filter(is_active=True, tenant_id=get_tenant_id(request))
 
         if emp_id:
             qs = qs.filter(employee_id=emp_id)
@@ -204,7 +205,7 @@ class CreateSalaryStructureView(APIView):
             return Response({'error': 'employee is required'}, status=400)
 
         try:
-            emp = User.objects.get(pk=emp_id)
+            emp = User.objects.get(pk=emp_id, tenant_id=get_tenant_id(request))
         except User.DoesNotExist:
             return Response({'error': 'Employee not found'}, status=404)
 
@@ -256,11 +257,15 @@ class CreateSalaryStructureView(APIView):
             ctc_warning = None
 
         # Deactivate old structure
-        SalaryStructure.objects.filter(employee=emp, is_active=True).update(is_active=False)
+        SalaryStructure.objects.filter(
+            employee=emp,
+            is_active=True,
+            tenant_id=get_tenant_id(request),
+        ).update(is_active=False)
 
         serializer = SalaryStructureSerializer(data=data)
         if serializer.is_valid():
-            obj = serializer.save(created_by=request.user)
+            obj = serializer.save(created_by=request.user, tenant_id=get_tenant_id(request))
             resp = dict(serializer.data)
             if ctc_warning:
                 resp['ctc_warning'] = ctc_warning
@@ -273,7 +278,7 @@ class UpdateSalaryStructureView(APIView):
     permission_classes = [make_permission('configure_salary')]
 
     def patch(self, request, pk):
-        structure = get_object_or_404(SalaryStructure, pk=pk)
+        structure = get_object_or_404(SalaryStructure, pk=pk, tenant_id=get_tenant_id(request))
         serializer = SalaryStructureSerializer(
             structure, data=request.data, partial=True
         )
@@ -288,7 +293,9 @@ class MySalaryStructureView(APIView):
 
     def get(self, request):
         structure = SalaryStructure.objects.filter(
-            employee=request.user, is_active=True
+            employee=request.user,
+            is_active=True,
+            tenant_id=get_tenant_id(request),
         ).order_by('-effective_date').first()
 
         if not structure:
@@ -321,8 +328,9 @@ def _run_period_from_request(request, month, year):
     return period_start, period_end
 
 
-def _overlapping_run(month, year, period_start, period_end):
+def _overlapping_run(month, year, period_start, period_end, tenant_id='default'):
     return PayrollRun.objects.filter(
+        tenant_id=tenant_id,
         month=month,
         year=year,
         period_start__lte=period_end,
@@ -333,7 +341,7 @@ def _overlapping_run(month, year, period_start, period_end):
 def _payroll_employee_options(run):
     processed_ids = set(run.entries.values_list('employee_id', flat=True))
     as_of = run.period_end
-    employees = User.objects.filter(is_active=True).select_related('profile').order_by(
+    employees = User.objects.filter(is_active=True, tenant_id=run.tenant_id).select_related('profile').order_by(
         'first_name', 'last_name', 'username'
     )
     data = []
@@ -360,9 +368,11 @@ def _payroll_employee_options(run):
 
 
 class PayrollRunListView(generics.ListAPIView):
-    queryset           = PayrollRun.objects.all()
     serializer_class   = PayrollRunSerializer
     permission_classes = [make_permission('view_payroll')]
+
+    def get_queryset(self):
+        return PayrollRun.objects.filter(tenant_id=get_tenant_id(self.request))
 
 
 class CreatePayrollRunView(APIView):
@@ -377,7 +387,7 @@ class CreatePayrollRunView(APIView):
         except ValueError as exc:
             return Response({'error': str(exc)}, status=400)
 
-        overlap = _overlapping_run(month, year, period_start, period_end)
+        overlap = _overlapping_run(month, year, period_start, period_end, get_tenant_id(request))
         if overlap:
             if overlap.period_start == period_start and overlap.period_end == period_end:
                 data = PayrollRunSerializer(overlap).data
@@ -395,6 +405,7 @@ class CreatePayrollRunView(APIView):
             )
 
         run = PayrollRun.objects.create(
+            tenant_id    = get_tenant_id(request),
             month        = month,
             year         = year,
             period_start = period_start,
@@ -411,7 +422,7 @@ class ProcessPayrollRunView(APIView):
     permission_classes = [make_permission('process_payroll')]
 
     def post(self, request, pk):
-        run = get_object_or_404(PayrollRun, pk=pk)
+        run = get_object_or_404(PayrollRun, pk=pk, tenant_id=get_tenant_id(request))
 
         if run.status == 'locked':
             return Response({'error': 'Payroll is locked and cannot be reprocessed'}, status=400)
@@ -436,7 +447,7 @@ class ProcessPayrollRunView(APIView):
         with transaction.atomic():
             employee_id = request.data.get('employee') or request.data.get('employee_id')
             employee_ids = [employee_id] if employee_id else None
-            if employee_id and PayrollEntry.objects.filter(payroll_run=run, employee_id=employee_id).exists():
+            if employee_id and PayrollEntry.objects.filter(payroll_run=run, employee_id=employee_id, tenant_id=get_tenant_id(request)).exists():
                 return Response({'error': 'Payroll already processed for this employee in this period'}, status=400)
 
             created, skipped = process_payroll_run(run, employee_ids=employee_ids)
@@ -460,7 +471,7 @@ class ApprovePayrollRunView(APIView):
     permission_classes = [make_permission('approve_payroll')]
 
     def post(self, request, pk):
-        run = get_object_or_404(PayrollRun, pk=pk)
+        run = get_object_or_404(PayrollRun, pk=pk, tenant_id=get_tenant_id(request))
 
         if run.status != 'processed':
             return Response(
@@ -483,9 +494,10 @@ class PayrollRunDetailView(APIView):
     permission_classes = [make_permission('view_payroll')]
 
     def get(self, request, pk):
-        run     = get_object_or_404(PayrollRun, pk=pk)
+        run     = get_object_or_404(PayrollRun, pk=pk, tenant_id=get_tenant_id(request))
         entries = PayrollEntry.objects.filter(
-            payroll_run=run
+            payroll_run=run,
+            tenant_id=get_tenant_id(request),
         ).select_related('employee', 'employee__profile', 'salary_structure')
 
         return Response({
@@ -501,7 +513,7 @@ class UpdatePayrollEntryView(APIView):
     permission_classes = [make_permission('process_payroll')]
 
     def patch(self, request, pk):
-        entry = get_object_or_404(PayrollEntry, pk=pk)
+        entry = get_object_or_404(PayrollEntry, pk=pk, tenant_id=get_tenant_id(request))
 
         if entry.payroll_run.status == 'locked':
             return Response({'error': 'Cannot edit a locked payroll'}, status=400)
@@ -540,7 +552,7 @@ class AddAdjustmentView(APIView):
     permission_classes = [make_permission('process_payroll')]
 
     def post(self, request, entry_pk):
-        entry = get_object_or_404(PayrollEntry, pk=entry_pk)
+        entry = get_object_or_404(PayrollEntry, pk=entry_pk, tenant_id=get_tenant_id(request))
 
         if entry.payroll_run.status == 'locked':
             return Response({'error': 'Cannot adjust a locked payroll'}, status=400)
@@ -553,6 +565,7 @@ class AddAdjustmentView(APIView):
             return Response({'error': 'Invalid adjustment type'}, status=400)
 
         adj = PayrollAdjustment.objects.create(
+            tenant_id      = get_tenant_id(request),
             payroll_entry = entry,
             type          = adj_type,
             amount        = amount,
@@ -579,6 +592,7 @@ class MyPayslipListView(APIView):
     def get(self, request):
         entries = PayrollEntry.objects.filter(
             employee=request.user,
+            tenant_id=get_tenant_id(request),
             payroll_run__status='locked',
         ).select_related('payroll_run', 'salary_structure').order_by(
             '-payroll_run__year', '-payroll_run__month'
@@ -592,6 +606,7 @@ class MyPayslipDetailView(APIView):
     def get(self, request, month, year):
         entry = PayrollEntry.objects.filter(
             employee=request.user,
+            tenant_id=get_tenant_id(request),
             payroll_run__month=month,
             payroll_run__year=year,
             payroll_run__status='locked',
@@ -609,9 +624,10 @@ class PayrollRegisterView(APIView):
     permission_classes = [make_permission('view_payroll')]
 
     def get(self, request, pk):
-        run = get_object_or_404(PayrollRun, pk=pk)
+        run = get_object_or_404(PayrollRun, pk=pk, tenant_id=get_tenant_id(request))
         entries = PayrollEntry.objects.filter(
-            payroll_run=run
+            payroll_run=run,
+            tenant_id=get_tenant_id(request),
         ).select_related(
             'employee', 'employee__profile', 'employee__profile__department'
         )

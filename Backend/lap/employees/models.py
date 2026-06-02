@@ -4,7 +4,8 @@ from accounts.models import User
 
 
 class Department(models.Model):
-    name        = models.CharField(max_length=100, unique=True)
+    tenant_id   = models.CharField(max_length=64, default='default', db_index=True)
+    name        = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     created_by  = models.ForeignKey(
         User, null=True, blank=True,
@@ -17,6 +18,7 @@ class Department(models.Model):
 
     class Meta:
         ordering = ['name']
+        unique_together = ['tenant_id', 'name']
 
 
 class EmployeeProfile(models.Model):
@@ -38,7 +40,8 @@ class EmployeeProfile(models.Model):
     ]
 
     user           = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    emp_code       = models.CharField(max_length=20, unique=True)
+    tenant_id      = models.CharField(max_length=64, default='default', db_index=True)
+    emp_code       = models.CharField(max_length=20)
     department     = models.ForeignKey(Department, null=True, blank=True, on_delete=models.SET_NULL, related_name='employees')
     designation    = models.CharField(max_length=50, choices=DESIGNATION_CHOICES, default='other')
     work_mode      = models.CharField(max_length=20, choices=WORK_MODE_CHOICES, default='office')
@@ -62,3 +65,4 @@ class EmployeeProfile(models.Model):
 
     class Meta:
         ordering = ['emp_code']
+        unique_together = ['tenant_id', 'emp_code']

@@ -6,6 +6,7 @@ from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from utils.permissions import make_any_permission
+from accounts.tenant_utils import get_tenant_id
 
 
 def csv_response(headers, rows, filename):
@@ -58,7 +59,7 @@ class AttendanceReportView(APIView):
 
         qs = AttendanceRecord.objects.select_related(
             'employee', 'employee__profile', 'employee__profile__department'
-        ).filter(date__year=year, date__month=month)
+        ).filter(tenant_id=get_tenant_id(request), date__year=year, date__month=month)
         if self_reports_only(request):
             qs = qs.filter(employee=request.user)
         if emp_id:
@@ -129,7 +130,7 @@ class LeaveReportView(APIView):
         qs = LeaveRequest.objects.select_related(
             'employee', 'employee__profile',
             'leave_type', 'approved_by'
-        ).filter(start_date__year=year, status=status)
+        ).filter(tenant_id=get_tenant_id(request), start_date__year=year, status=status)
         if self_reports_only(request):
             qs = qs.filter(employee=request.user)
         if month:
@@ -200,7 +201,7 @@ class PayrollReportView(APIView):
         entries = PayrollEntry.objects.select_related(
             'employee', 'employee__profile',
             'employee__profile__department', 'payroll_run'
-        ).filter(payroll_run__month=month, payroll_run__year=year)
+        ).filter(tenant_id=get_tenant_id(request), payroll_run__month=month, payroll_run__year=year)
         if self_reports_only(request):
             entries = entries.filter(employee=request.user)
 
@@ -275,7 +276,7 @@ class HeadcountReportView(APIView):
         from accounts.models import User
         fmt = request.query_params.get('format', 'json')
 
-        employees = User.objects.filter(is_active=True).select_related(
+        employees = User.objects.filter(is_active=True, tenant_id=get_tenant_id(request)).select_related(
             'profile', 'profile__department'
         )
 
@@ -331,6 +332,7 @@ class LopSummaryView(APIView):
         entries = PayrollEntry.objects.select_related(
             'employee', 'employee__profile', 'employee__profile__department'
         ).filter(
+            tenant_id=get_tenant_id(request),
             payroll_run__month=month, payroll_run__year=year, lop_days__gt=0
         ).order_by('-lop_days')
         if self_reports_only(request):
@@ -381,6 +383,7 @@ class OvertimeReportView(APIView):
         entries = PayrollEntry.objects.select_related(
             'employee', 'employee__profile', 'employee__profile__department'
         ).filter(
+            tenant_id=get_tenant_id(request),
             payroll_run__month=month, payroll_run__year=year, ot_hours__gt=0
         ).order_by('-ot_hours')
         if self_reports_only(request):
@@ -432,10 +435,11 @@ class ReportsDashboardView(APIView):
         month = int(request.query_params.get('month', today.month))
         year  = int(request.query_params.get('year', today.year))
 
-        att   = AttendanceRecord.objects.filter(date__year=year, date__month=month)
-        leave = LeaveRequest.objects.filter(start_date__year=year, start_date__month=month)
-        last_run = PayrollRun.objects.order_by('-year','-month').first()
-        pe = PayrollEntry.objects.filter(payroll_run=last_run) if last_run else []
+        tenant_id = get_tenant_id(request)
+        att   = AttendanceRecord.objects.filter(tenant_id=tenant_id, date__year=year, date__month=month)
+        leave = LeaveRequest.objects.filter(tenant_id=tenant_id, start_date__year=year, start_date__month=month)
+        last_run = PayrollRun.objects.filter(tenant_id=tenant_id).order_by('-year','-month').first()
+        pe = PayrollEntry.objects.filter(tenant_id=tenant_id, payroll_run=last_run) if last_run else []
         if self_reports_only(request):
             att = att.filter(employee=request.user)
             leave = leave.filter(employee=request.user)
@@ -445,9 +449,9 @@ class ReportsDashboardView(APIView):
             total_active = 1 if request.user.is_active else 0
             by_role = {request.user.role: total_active}
         else:
-            total_active = User.objects.filter(is_active=True).count()
+            total_active = User.objects.filter(is_active=True, tenant_id=tenant_id).count()
             by_role = {
-                r: User.objects.filter(role=r, is_active=True).count()
+                r: User.objects.filter(role=r, is_active=True, tenant_id=tenant_id).count()
                 for r in ['admin','manager','hr','employee']
             }
 

@@ -16,6 +16,7 @@ class IsAdminOrHR(BasePermission):
         )
 from .models import Notification, SystemSetting
 from .serializers import NotificationSerializer, SystemSettingSerializer
+from accounts.tenant_utils import get_tenant_id
 
 
 # ─── Notification Views ──────────────────────────────────────────────────────
@@ -119,9 +120,10 @@ DEFAULT_SETTINGS = [
 ]
 
 
-def seed_default_settings():
+def seed_default_settings(tenant_id='default'):
     for s in DEFAULT_SETTINGS:
         obj, _ = SystemSetting.objects.get_or_create(
+            tenant_id=tenant_id,
             key=s['key'],
             defaults={
                 'value':       s['value'],
@@ -137,7 +139,7 @@ def seed_default_settings():
             obj.save(update_fields=['value', 'description'])
     try:
         from attendance.models import OfficeLocation
-        office = OfficeLocation.active()
+        office = OfficeLocation.objects.filter(tenant_id=tenant_id, is_active=True).first()
         if office:
             current = {
                 'office_latitude': str(office.latitude),
@@ -145,7 +147,7 @@ def seed_default_settings():
                 'office_radius_meters': str(office.radius_meters),
             }
             for key, value in current.items():
-                setting = SystemSetting.objects.filter(key=key).first()
+                setting = SystemSetting.objects.filter(tenant_id=tenant_id, key=key).first()
                 if setting and not str(setting.value).strip():
                     setting.value = value
                     setting.save(update_fields=['value'])
@@ -153,14 +155,14 @@ def seed_default_settings():
         pass
 
 
-def sync_office_location_from_settings(updated_by=None):
+def sync_office_location_from_settings(updated_by=None, tenant_id='default'):
     """
     Keep attendance.OfficeLocation in sync with General Settings.
     If latitude/longitude are blank, leave the current office record untouched.
     """
-    lat = SystemSetting.objects.filter(key='office_latitude').first()
-    lon = SystemSetting.objects.filter(key='office_longitude').first()
-    radius = SystemSetting.objects.filter(key='office_radius_meters').first()
+    lat = SystemSetting.objects.filter(tenant_id=tenant_id, key='office_latitude').first()
+    lon = SystemSetting.objects.filter(tenant_id=tenant_id, key='office_longitude').first()
+    radius = SystemSetting.objects.filter(tenant_id=tenant_id, key='office_radius_meters').first()
     if not lat or not lon or not str(lat.value).strip() or not str(lon.value).strip():
         return None
 
@@ -173,10 +175,11 @@ def sync_office_location_from_settings(updated_by=None):
         return None
 
     from attendance.models import OfficeLocation
-    office = OfficeLocation.objects.filter(is_active=True).first()
+    office = OfficeLocation.objects.filter(tenant_id=tenant_id, is_active=True).first()
     if not office:
-        OfficeLocation.objects.filter(is_active=True).update(is_active=False)
+        OfficeLocation.objects.filter(tenant_id=tenant_id, is_active=True).update(is_active=False)
         office = OfficeLocation.objects.create(
+            tenant_id=tenant_id,
             name='Head Office',
             latitude=latitude,
             longitude=longitude,
@@ -201,8 +204,9 @@ class SystemSettingsView(APIView):
         return [IsAdminOrHR()]
 
     def get(self, request):
-        seed_default_settings()
-        settings_qs = SystemSetting.objects.all()
+        tenant_id = get_tenant_id(request)
+        seed_default_settings(tenant_id)
+        settings_qs = SystemSetting.objects.filter(tenant_id=tenant_id)
         data = {}
         for s in settings_qs:
             if s.category not in data:
@@ -215,11 +219,12 @@ class SystemSettingsView(APIView):
         updates = request.data  # dict of { key: value }
         updated = []
         errors = []
+        tenant_id = get_tenant_id(request)
         for key, value in updates.items():
             try:
                 if key == 'payroll_lock_day':
                     value = '1'
-                setting = SystemSetting.objects.get(key=key)
+                setting = SystemSetting.objects.get(tenant_id=tenant_id, key=key)
                 setting.value = str(value)
                 setting.updated_by = request.user
                 setting.save()
@@ -227,7 +232,7 @@ class SystemSettingsView(APIView):
             except SystemSetting.DoesNotExist:
                 errors.append(f'{key} not found')
         if {'office_latitude', 'office_longitude', 'office_radius_meters'} & set(updated):
-            sync_office_location_from_settings(request.user)
+            sync_office_location_from_settings(request.user, tenant_id)
         return Response({'updated': updated, 'errors': errors})
 
 
@@ -237,7 +242,8 @@ class SystemSettingDetailView(APIView):
 
     def patch(self, request, key):
         try:
-            setting = SystemSetting.objects.get(key=key)
+            tenant_id = get_tenant_id(request)
+            setting = SystemSetting.objects.get(tenant_id=tenant_id, key=key)
         except SystemSetting.DoesNotExist:
             return Response({'error': f'Setting "{key}" not found'}, status=404)
 
@@ -252,5 +258,5 @@ class SystemSettingDetailView(APIView):
         setting.updated_by = request.user
         setting.save()
         if key in ('office_latitude', 'office_longitude', 'office_radius_meters'):
-            sync_office_location_from_settings(request.user)
+            sync_office_location_from_settings(request.user, get_tenant_id(request))
         return Response(SystemSettingSerializer(setting).data)

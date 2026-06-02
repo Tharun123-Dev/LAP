@@ -134,6 +134,7 @@ def get_or_create_balance(employee, leave_type, year: int) -> LeaveBalance:
         employee=employee,
         leave_type=leave_type,
         year=year,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
         defaults={'total': base_allocation},
     )
     _sync_balance_total(balance, base_allocation)
@@ -155,6 +156,7 @@ def init_balances_for_employee(employee, year: int = None) -> int:
     emp_type = getattr(employee, 'employee_type', 'regular')
     types = LeaveType.objects.filter(
         is_active=True,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
     ).filter(applicable_to__in=['all', emp_type])
 
     created_count = 0
@@ -165,6 +167,7 @@ def init_balances_for_employee(employee, year: int = None) -> int:
             employee=employee,
             leave_type=lt,
             year=year,
+            tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
             defaults={'total': allocated},
         )
         if created:
@@ -194,9 +197,9 @@ def sync_balances_for_leave_type(leave_type: LeaveType, year: int = None) -> dic
     emp_type = leave_type.applicable_to
 
     if emp_type == 'all':
-        employees = User.objects.filter(is_active=True)
+        employees = User.objects.filter(is_active=True, tenant_id=leave_type.tenant_id)
     else:
-        employees = User.objects.filter(is_active=True, employee_type=emp_type)
+        employees = User.objects.filter(is_active=True, employee_type=emp_type, tenant_id=leave_type.tenant_id)
 
     created = updated = skipped = 0
 
@@ -206,6 +209,7 @@ def sync_balances_for_leave_type(leave_type: LeaveType, year: int = None) -> dic
             employee=emp,
             leave_type=leave_type,
             year=year,
+            tenant_id=leave_type.tenant_id,
             defaults={
                 'total':   base_allocation,
                 'used':    0,
@@ -303,6 +307,7 @@ def process_carry_forward(year: int = None) -> dict:
                 employee=emp,
                 leave_type=lt,
                 year=next_year,
+                tenant_id=getattr(emp, 'tenant_id', 'default') or 'default',
                 defaults={'total': _base_allocation_for_employee(emp, lt)},
             )
 
@@ -331,7 +336,9 @@ def get_leave_balance_summary(employee, year: int) -> list:
          system setting (e.g. cl_carry_forward=false hides CL from CF display).
     """
     balances = LeaveBalance.objects.filter(
-        employee=employee, year=year,
+        employee=employee,
+        year=year,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
     ).select_related('leave_type').order_by('leave_type__name')
 
     result = []

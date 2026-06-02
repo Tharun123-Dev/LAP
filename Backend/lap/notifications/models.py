@@ -55,7 +55,8 @@ class SystemSetting(models.Model):
         ('time',     'Time (HH:MM)'),
     ]
 
-    key          = models.CharField(max_length=100, unique=True)
+    tenant_id    = models.CharField(max_length=64, default='default', db_index=True)
+    key          = models.CharField(max_length=100)
     value        = models.TextField()
     value_type   = models.CharField(max_length=20, choices=VALUE_TYPES, default='string')
     label        = models.CharField(max_length=200)
@@ -69,6 +70,7 @@ class SystemSetting(models.Model):
 
     class Meta:
         ordering = ['category', 'key']
+        unique_together = ['tenant_id', 'key']
 
     def __str__(self):
         return f"{self.category} | {self.key} = {self.value}"

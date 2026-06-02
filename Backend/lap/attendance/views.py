@@ -18,6 +18,7 @@ from rest_framework import status, generics
 from django.shortcuts import get_object_or_404
 
 from utils.permissions import make_permission, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from accounts.models import User
 from .models import AttendanceRecord, AttendanceRegularization, Holiday, OfficeLocation
 from .serializers import (
@@ -267,7 +268,10 @@ class OfficeLocationView(APIView):
         return [make_permission('manage_settings')()]
 
     def get(self, request):
-        office = OfficeLocation.active()
+        office = OfficeLocation.objects.filter(
+            tenant_id=get_tenant_id(request),
+            is_active=True,
+        ).first()
         if not office:
             return Response({'detail': 'No office location configured.'}, status=404)
         return Response(OfficeLocationSerializer(office).data)
@@ -279,8 +283,12 @@ class OfficeLocationView(APIView):
         radius_meters = request.data.get('radius_meters', 300)
         if latitude is None or longitude is None:
             return Response({'error': 'latitude and longitude are required'}, status=status.HTTP_400_BAD_REQUEST)
-        OfficeLocation.objects.filter(is_active=True).update(is_active=False)
+        OfficeLocation.objects.filter(
+            tenant_id=get_tenant_id(request),
+            is_active=True,
+        ).update(is_active=False)
         office = OfficeLocation.objects.create(
+            tenant_id=get_tenant_id(request),
             name=name, latitude=latitude, longitude=longitude,
             radius_meters=radius_meters, is_active=True,
         )
@@ -691,6 +699,7 @@ class AllAttendanceView(APIView):
         emp_id = request.query_params.get('employee')
 
         qs = AttendanceRecord.objects.filter(
+            tenant_id=get_tenant_id(request),
             date__year=year, date__month=month,
         ).select_related('employee', 'employee__profile').order_by('employee__username', 'date')
 
@@ -781,7 +790,10 @@ class MyRegularizationsView(APIView):
     permission_classes = [IsAuthenticatedUser]
 
     def get(self, request):
-        regs = AttendanceRegularization.objects.filter(employee=request.user).order_by('-created_at')
+        regs = AttendanceRegularization.objects.filter(
+            employee=request.user,
+            tenant_id=get_tenant_id(request),
+        ).order_by('-created_at')
         return Response(RegularizationSerializer(regs, many=True).data)
 
 
@@ -794,7 +806,7 @@ class AllRegularizationsView(APIView):
         status_filter = request.query_params.get('status')
         qs = AttendanceRegularization.objects.select_related(
             'employee', 'employee__profile', 'attendance',
-        ).exclude(employee=request.user).order_by('-created_at')
+        ).filter(tenant_id=get_tenant_id(request)).exclude(employee=request.user).order_by('-created_at')
         if status_filter:
             qs = qs.filter(status=status_filter)
         return Response(RegularizationSerializer(qs, many=True).data)
@@ -806,7 +818,11 @@ class ApproveRegularizationView(APIView):
     permission_classes = [make_permission('approve_regularize')]
 
     def post(self, request, pk):
-        reg    = get_object_or_404(AttendanceRegularization, pk=pk)
+        reg    = get_object_or_404(
+            AttendanceRegularization,
+            pk=pk,
+            tenant_id=get_tenant_id(request),
+        )
         action = request.data.get('action')
         note   = request.data.get('note', '')
 
@@ -859,13 +875,18 @@ class ApproveRegularizationView(APIView):
 # POST /attendance/holidays/     — manage_settings only
 
 class HolidayListView(generics.ListCreateAPIView):
-    queryset         = Holiday.objects.all()
     serializer_class = HolidaySerializer
+
+    def get_queryset(self):
+        return Holiday.objects.filter(tenant_id=get_tenant_id(self.request))
 
     def get_permissions(self):
         if self.request.method == 'GET':
             return [IsAuthenticatedUser()]
         return [make_permission('manage_settings')()]
+
+    def perform_create(self, serializer):
+        serializer.save(tenant_id=get_tenant_id(self.request))
 
 
 # ── HOLIDAYS — EDIT / DELETE ──────────────────────────────────────────────────
@@ -877,7 +898,7 @@ class HolidayDetailView(APIView):
     permission_classes = [make_permission('manage_settings')]
 
     def _get_holiday(self, pk):
-        return get_object_or_404(Holiday, pk=pk)
+        return get_object_or_404(Holiday, pk=pk, tenant_id=get_tenant_id(self.request))
 
     def put(self, request, pk):
         holiday    = self._get_holiday(pk)

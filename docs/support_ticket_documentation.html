@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LAP Support Ticket Documentation</title>
+  <style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: Arial, sans-serif; color: #111827; line-height: 1.42; }
+    h1 { font-size: 25px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 18px 0 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    p, li { font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 12px; font-size: 11px; }
+    th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    ul { margin: 6px 0 12px 18px; padding: 0; }
+    .meta { color: #6b7280; font-size: 11px; margin-bottom: 14px; }
+    .note { background: #eff6ff; border-left: 4px solid #2563eb; padding: 9px 11px; margin: 10px 0; font-size: 12px; }
+    code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>LAP Support Ticket Module</h1>
+  <div class="meta">Short documentation for permissions, tenant behavior, user flow, manager flow, APIs, and testing.</div>
+
+  <h2>Purpose</h2>
+  <p>The Support Ticket module lets employees raise issues, track their own ticket status, and lets higher-permission users resolve, update, close, and reopen tickets.</p>
+
+  <h2>Permissions</h2>
+  <table>
+    <tr><th>Permission</th><th>Access</th></tr>
+    <tr><td><code>raise_support_ticket</code></td><td>Can raise a new support ticket.</td></tr>
+    <tr><td><code>view_support_tickets</code></td><td>Can view My Tracking for own tickets only. Read-only.</td></tr>
+    <tr><td><code>manage_support_tickets</code></td><td>Can view all tickets and update, assign, resolve, close, or reopen.</td></tr>
+    <tr><td><code>manage_support_ticket_types</code></td><td>Can add or disable dynamic issue types.</td></tr>
+  </table>
+
+  <h2>Frontend Flow</h2>
+  <ul>
+    <li>Sidebar item: Support Tickets, shown only with support-ticket permission.</li>
+    <li>Raise Ticket: select issue type, priority, subject, and description.</li>
+    <li>My Tracking: requester sees own ticket status and notes only.</li>
+    <li>All Tickets: manager/admin can update status and add notes.</li>
+    <li>Issue Types: admin/support manager can add or disable issue categories.</li>
+  </ul>
+
+  <h2>Default Issue Types</h2>
+  <p>Technical Issue, Billing, HR Support, Leave Problem, Payroll Issue, Login Problem, Vendor Support, LMS Issue, CRM Issue, Attendance Issue, Asset Request, Network Issue, Software Access, Data Correction, Policy Question.</p>
+
+  <h2>Status and Priority</h2>
+  <table>
+    <tr><th>Type</th><th>Values</th></tr>
+    <tr><td>Status</td><td>Open, In Progress, Waiting User, Resolved, Closed, Reopened</td></tr>
+    <tr><td>Priority</td><td>Low, Medium, High, Urgent</td></tr>
+  </table>
+
+  <h2>Tenant Handling</h2>
+  <div class="note">Tenant ID is backend-owned. The frontend does not show or send tenant ID. Support tickets use <code>request.user.tenant_id</code>, so users only work inside their own tenant.</div>
+
+  <h2>Backend APIs</h2>
+  <table>
+    <tr><th>Endpoint</th><th>Purpose</th></tr>
+    <tr><td><code>GET /api/support/ticket-types/</code></td><td>List issue types.</td></tr>
+    <tr><td><code>POST /api/support/tickets/raise/</code></td><td>Raise ticket.</td></tr>
+    <tr><td><code>GET /api/support/tickets/my/</code></td><td>Requester tracking.</td></tr>
+    <tr><td><code>GET /api/support/tickets/all/</code></td><td>All ticket list for managers.</td></tr>
+    <tr><td><code>POST /api/support/tickets/&lt;id&gt;/action/</code></td><td>Manager update/resolve/close/reopen.</td></tr>
+    <tr><td><code>GET /api/support/tickets/summary/</code></td><td>Permission-based stats.</td></tr>
+  </table>
+
+  <h2>How To Check</h2>
+  <ul>
+    <li>Login as employee with raise/view support permissions.</li>
+    <li>Raise a ticket and check My Tracking. It should be read-only.</li>
+    <li>Login as HR/Admin/support manager.</li>
+    <li>Open All Tickets, update status, add notes, resolve or close.</li>
+    <li>Login again as requester and verify updated status and notes.</li>
+  </ul>
+</body>
+</html>

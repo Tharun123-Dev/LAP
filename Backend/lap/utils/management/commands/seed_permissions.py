@@ -40,6 +40,11 @@ ALL_PERMISSIONS = [
     ('view_reports',         'View reports',                   'reports'),
     ('self_reports',         'View own reports',               'reports'),
     ('export_reports',       'Export reports',                 'reports'),
+
+    ('raise_support_ticket',        'Raise support ticket',        'support_tickets'),
+    ('view_support_tickets',        'Track own support tickets',   'support_tickets'),
+    ('manage_support_tickets',      'Resolve all support tickets', 'support_tickets'),
+    ('manage_support_ticket_types', 'Manage ticket issue types',   'support_tickets'),
 ]
 
 ALL_CODES = [p[0] for p in ALL_PERMISSIONS]
@@ -54,6 +59,7 @@ ROLE_DEFAULTS = {
         'view_leave', 'apply_leave', 'cancel_leave',
         'view_all_leave', 'approve_leave',
         'view_payslip', 'view_reports',
+        'raise_support_ticket', 'view_support_tickets',
     ],
 
     'hr': [
@@ -64,12 +70,15 @@ ROLE_DEFAULTS = {
         'view_all_leave', 'approve_leave', 'configure_leave',
         'view_salary', 'view_payroll', 'view_payslip',
         'view_reports', 'export_reports',
+        'raise_support_ticket', 'view_support_tickets',
+        'manage_support_tickets', 'manage_support_ticket_types',
     ],
 
     'employee': [
         'view_attendance',
         'view_leave', 'apply_leave', 'cancel_leave',
         'view_payslip',
+        'raise_support_ticket', 'view_support_tickets',
     ],
 }
 
@@ -97,7 +106,7 @@ class Command(BaseCommand):
                 self.stdout.write(f'  + {code}')
 
         self.stdout.write(self.style.SUCCESS(
-            f'✓ Permissions: {created_count} new, {Permission.objects.count()} total'
+            f'OK Permissions: {created_count} new, {Permission.objects.count()} total'
         ))
 
         # ── Step 2: Optionally clear existing role permissions ────────────
@@ -125,9 +134,9 @@ class Command(BaseCommand):
                     else:
                         rp_updated += 1
                 except Permission.DoesNotExist:
-                    self.stdout.write(self.style.WARNING(f'  ⚠ Not found: {code}'))
+                    self.stdout.write(self.style.WARNING(f'  Not found: {code}'))
 
         self.stdout.write(self.style.SUCCESS(
-            f'✓ Role permissions: {rp_created} created, {rp_updated} updated\n'
+            f'OK Role permissions: {rp_created} created, {rp_updated} updated\n'
         ))
-        self.stdout.write(self.style.SUCCESS('✓ All permissions seeded correctly!'))
+        self.stdout.write(self.style.SUCCESS('OK All permissions seeded correctly!'))

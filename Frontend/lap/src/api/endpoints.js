@@ -4,8 +4,8 @@
 // Change:  Added HOLIDAY_DETAIL: (id) => `…/holidays/${id}/`
 //          (needed for PUT / DELETE on individual holidays)
 
-// const BASE = 'http://localhost:8000/api'
-const BASE = 'https://lap-b9vi.onrender.com/api'
+const BASE = 'http://localhost:8000/api'
+// const BASE = 'https://lap-b9vi.onrender.com/api'
 
 const ENDPOINTS = {
   AUTH: {
@@ -86,6 +86,16 @@ const ENDPOINTS = {
     EMP_DEDUCTIONS:      (id) => `${BASE}/payroll/deductions/employee/${id}/`,
     DEDUCTION_SUMMARY:             `${BASE}/payroll/deductions/summary/`,
     DASHBOARD_STATS:               `${BASE}/payroll/dashboard-stats/`,
+  },
+  SUPPORT_TICKETS: {
+    TYPES:              `${BASE}/support/ticket-types/`,
+    TYPE_DETAIL: (id) => `${BASE}/support/ticket-types/${id}/`,
+    RAISE:              `${BASE}/support/tickets/raise/`,
+    MY:                 `${BASE}/support/tickets/my/`,
+    ALL:                `${BASE}/support/tickets/all/`,
+    SUMMARY:            `${BASE}/support/tickets/summary/`,
+    ACTION:      (id) => `${BASE}/support/tickets/${id}/action/`,
+    REQUESTER_ACTION: (id) => `${BASE}/support/tickets/${id}/requester-action/`,
   },
   REPORTS: {
     ATTENDANCE: `${BASE}/reports/attendance/`,

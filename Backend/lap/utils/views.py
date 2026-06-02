@@ -5,6 +5,7 @@ from rest_framework import generics, status
 from django.shortcuts import get_object_or_404
 
 from utils.permissions import make_permission, IsSuperAdmin, IsAuthenticatedUser
+from accounts.tenant_utils import get_tenant_id
 from .models import Permission, RolePermission, UserPermissionOverride
 from .serializers import PermissionSerializer, UserPermissionOverrideSerializer
 from accounts.models import User
@@ -114,7 +115,7 @@ class UserPermissionsView(APIView):
     permission_classes = [CanManagePermissions]
 
     def get(self, request, user_id):
-        user = get_object_or_404(User, pk=user_id)
+        user = get_object_or_404(User, pk=user_id, tenant_id=get_tenant_id(request))
         all_perms = Permission.objects.all().order_by('module', 'code')
 
         # Get existing overrides for this user
@@ -145,7 +146,7 @@ class UserPermissionsView(APIView):
         Body: { permissions: [{code, is_granted}, ...] }
         Replaces all permission overrides for this user.
         """
-        user = get_object_or_404(User, pk=user_id)
+        user = get_object_or_404(User, pk=user_id, tenant_id=get_tenant_id(request))
         permissions_data = request.data.get('permissions', [])
 
         saved = 0
@@ -186,7 +187,10 @@ class CustomRoleListView(APIView):
 
     def get(self, request):
         from accounts.models import CustomRole
-        roles = CustomRole.objects.filter(is_active=True).values(
+        roles = CustomRole.objects.filter(
+            is_active=True,
+            tenant_id=get_tenant_id(request),
+        ).values(
             'id', 'name', 'display_name', 'level', 'base_role', 'description', 'created_at'
         )
         return Response(list(roles))
@@ -198,7 +202,7 @@ class CustomRoleListView(APIView):
         from accounts.serializers import CustomRoleSerializer
         ser = CustomRoleSerializer(data=request.data)
         if ser.is_valid():
-            ser.save()
+            ser.save(tenant_id=get_tenant_id(request))
             return Response(ser.data, status=201)
         return Response(ser.errors, status=400)
 
@@ -209,7 +213,7 @@ class CustomRoleDetailView(APIView):
     def patch(self, request, pk):
         from accounts.models import CustomRole
         from accounts.serializers import CustomRoleSerializer
-        role = get_object_or_404(CustomRole, pk=pk)
+        role = get_object_or_404(CustomRole, pk=pk, tenant_id=get_tenant_id(request))
         ser = CustomRoleSerializer(role, data=request.data, partial=True)
         if ser.is_valid():
             ser.save()
@@ -218,7 +222,7 @@ class CustomRoleDetailView(APIView):
 
     def delete(self, request, pk):
         from accounts.models import CustomRole
-        role = get_object_or_404(CustomRole, pk=pk)
+        role = get_object_or_404(CustomRole, pk=pk, tenant_id=get_tenant_id(request))
         role.is_active = False
         role.save()
         return Response({'message': 'Role deactivated'})

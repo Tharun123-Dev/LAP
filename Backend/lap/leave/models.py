@@ -12,8 +12,9 @@ class LeaveType(models.Model):
         ('intern',   'Intern'),
     ]
 
-    name              = models.CharField(max_length=100, unique=True)
-    code              = models.CharField(max_length=20, unique=True)
+    tenant_id         = models.CharField(max_length=64, default='default', db_index=True)
+    name              = models.CharField(max_length=100)
+    code              = models.CharField(max_length=20)
     days_allowed      = models.IntegerField(default=0)
     applicable_to     = models.CharField(max_length=20, choices=EMPLOYEE_TYPES, default='all')
     carry_forward     = models.BooleanField(default=False)
@@ -27,12 +28,14 @@ class LeaveType(models.Model):
 
     class Meta:
         ordering = ['name']
+        unique_together = [['tenant_id', 'name'], ['tenant_id', 'code']]
 
     def __str__(self):
         return f"{self.name} ({self.code})"
 
 
 class LeaveBalance(models.Model):
+    tenant_id  = models.CharField(max_length=64, default='default', db_index=True)
     employee   = models.ForeignKey(User, on_delete=models.CASCADE, related_name='leave_balances')
     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE, related_name='balances')
     year       = models.IntegerField()
@@ -52,6 +55,11 @@ class LeaveBalance(models.Model):
     def __str__(self):
         return f"{self.employee.username} | {self.leave_type.name} | {self.year}"
 
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)
+
 
 class LeaveRequest(models.Model):
     STATUS_CHOICES = [
@@ -66,6 +74,7 @@ class LeaveRequest(models.Model):
         ('second_half', 'Second Half'),
     ]
 
+    tenant_id    = models.CharField(max_length=64, default='default', db_index=True)
     employee     = models.ForeignKey(User, on_delete=models.CASCADE, related_name='leave_requests')
     leave_type   = models.ForeignKey(LeaveType, on_delete=models.CASCADE, related_name='requests')
     start_date   = models.DateField()
@@ -88,3 +97,8 @@ class LeaveRequest(models.Model):
 
     def __str__(self):
         return f"{self.employee.username} | {self.leave_type.name} | {self.start_date} | {self.status}"
+
+    def save(self, *args, **kwargs):
+        if (not self.tenant_id or self.tenant_id == 'default') and self.employee_id:
+            self.tenant_id = getattr(self.employee, 'tenant_id', 'default') or 'default'
+        super().save(*args, **kwargs)

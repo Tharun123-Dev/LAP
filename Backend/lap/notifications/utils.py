@@ -24,6 +24,8 @@ def notify_role(roles, title, body, notif_type='general', exclude_user=None):
 
     qs = User.objects.filter(role__in=roles, is_active=True)
     if exclude_user:
+        qs = qs.filter(tenant_id=getattr(exclude_user, 'tenant_id', 'default'))
+    if exclude_user:
         qs = qs.exclude(pk=exclude_user.pk)
 
     notifications = [
@@ -51,6 +53,8 @@ def notify_permission(perm_code, title, body, notif_type='general', exclude_user
 
     # 2. Users via role
     qs = User.objects.filter(role__in=roles_with_perm, is_active=True)
+    if exclude_user:
+        qs = qs.filter(tenant_id=getattr(exclude_user, 'tenant_id', 'default'))
 
     # 3. Add users with override grant
     override_granted = set(
@@ -74,6 +78,8 @@ def notify_permission(perm_code, title, body, notif_type='general', exclude_user
         all_user_ids.discard(exclude_user.pk)
 
     target_users = User.objects.filter(id__in=all_user_ids, is_active=True)
+    if exclude_user:
+        target_users = target_users.filter(tenant_id=getattr(exclude_user, 'tenant_id', 'default'))
 
     notifications = [
         Notification(user=u, title=title, body=body, type=notif_type)
@@ -210,7 +216,7 @@ def notify_payroll_processed(payroll_run, processed_by):
     processor_role = processed_by.get_display_role()
     month_year = f"{payroll_run.month}/{payroll_run.year}"
 
-    employees = User.objects.filter(is_active=True)
+    employees = User.objects.filter(is_active=True, tenant_id=getattr(processed_by, 'tenant_id', 'default'))
     notifications = [
         Notification(
             user=u,

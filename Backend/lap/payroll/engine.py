@@ -46,10 +46,15 @@ COMP_OFF_CODES = {'COMP_OFF', 'COMP', 'CO', 'COMPENSATORY'}
 
 def get_active_structure(employee, as_of_date):
     qs = SalaryStructure.objects.filter(
-        employee=employee, is_active=True, effective_date__lte=as_of_date,
+        employee=employee,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
+        is_active=True,
+        effective_date__lte=as_of_date,
     ).order_by('-effective_date')
     return qs.first() or SalaryStructure.objects.filter(
-        employee=employee, is_active=True,
+        employee=employee,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
+        is_active=True,
     ).order_by('effective_date').first()
 
 
@@ -73,7 +78,9 @@ def get_approved_leave_dates(employee, year, month, period_start=None, period_en
     start_of_month, end_of_month = get_run_period(year, month, period_start, period_end)
 
     approved = LeaveRequest.objects.filter(
-        employee=employee, status='approved',
+        employee=employee,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
+        status='approved',
         start_date__lte=end_of_month, end_date__gte=start_of_month,
     ).select_related('leave_type')
 
@@ -231,6 +238,7 @@ def calculate_employee_payroll_values(emp, structure, year, month, period_start=
 def queue_locked_regularization_adjustment(regularization):
     record = regularization.attendance
     source_run = PayrollRun.objects.filter(
+        tenant_id=record.tenant_id,
         month=record.date.month,
         year=record.date.year,
         status='locked',
@@ -241,6 +249,7 @@ def queue_locked_regularization_adjustment(regularization):
         return None
 
     old_entry = PayrollEntry.objects.filter(
+        tenant_id=record.tenant_id,
         payroll_run=source_run,
         employee=record.employee,
     ).select_related('salary_structure').first()
@@ -254,6 +263,7 @@ def queue_locked_regularization_adjustment(regularization):
         source_run.month,
     )
     existing = PayrollCarryForwardAdjustment.objects.filter(
+        tenant_id=record.tenant_id,
         source_regularization=regularization,
         status='pending',
     ).first()
@@ -261,6 +271,7 @@ def queue_locked_regularization_adjustment(regularization):
     already_queued = sum(
         item.amount
         for item in PayrollCarryForwardAdjustment.objects.filter(
+            tenant_id=record.tenant_id,
             employee=record.employee,
             source_run=source_run,
         ).exclude(pk=existing.pk if existing else None).exclude(status='ignored')
@@ -286,6 +297,7 @@ def queue_locked_regularization_adjustment(regularization):
 
     return PayrollCarryForwardAdjustment.objects.create(
         employee=record.employee,
+        tenant_id=record.tenant_id,
         source_run=source_run,
         source_regularization=regularization,
         source_month=source_run.month,
@@ -297,6 +309,7 @@ def queue_locked_regularization_adjustment(regularization):
 
 def apply_pending_carry_forward_adjustments(entry):
     pending = PayrollCarryForwardAdjustment.objects.filter(
+        tenant_id=entry.tenant_id,
         employee=entry.employee,
         status='pending',
     ).exclude(
@@ -330,6 +343,7 @@ def apply_pending_carry_forward_adjustments(entry):
             changed_entry = True
 
         PayrollAdjustment.objects.create(
+            tenant_id=entry.tenant_id,
             payroll_entry=entry,
             type=adj_type,
             amount=adj_amount,
@@ -349,6 +363,7 @@ def count_comp_off_leave_days(employee, year, month, period_start=None, period_e
     start_of_month, end_of_month = get_run_period(year, month, period_start, period_end)
     approved = LeaveRequest.objects.filter(
         employee=employee,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
         status='approved',
         start_date__lte=end_of_month,
         end_date__gte=start_of_month,
@@ -367,6 +382,7 @@ def get_attendance_summary(employee, year, month, period_start=None, period_end=
 
     records = AttendanceRecord.objects.filter(
         employee=employee,
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
         date__gte=period_start,
         date__lte=period_end,
     )
@@ -425,6 +441,7 @@ def get_attendance_summary(employee, year, month, period_start=None, period_end=
     
     holiday_dates = set(
         Holiday.objects.filter(date__gte=period_start, date__lte=period_end)
+        .filter(tenant_id=getattr(employee, 'tenant_id', 'default') or 'default')
         .values_list('date', flat=True)
     )
     paid_full_dates, paid_half_dates, lop_dates = (
@@ -555,9 +572,17 @@ def get_attendance_summary(employee, year, month, period_start=None, period_end=
 
     # Count holidays this month for display in payslip attendance section
     from attendance.models import Holiday as _Holiday
-    holiday_count = _Holiday.objects.filter(date__gte=period_start, date__lte=period_end).count()
+    holiday_count = _Holiday.objects.filter(
+        tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
+        date__gte=period_start,
+        date__lte=period_end,
+    ).count()
     holiday_names = list(
-        _Holiday.objects.filter(date__gte=period_start, date__lte=period_end)
+        _Holiday.objects.filter(
+            tenant_id=getattr(employee, 'tenant_id', 'default') or 'default',
+            date__gte=period_start,
+            date__lte=period_end,
+        )
         .values_list('name', flat=True)
     )
 
@@ -615,13 +640,13 @@ def process_payroll_run(payroll_run: PayrollRun, employee_ids=None):
     esi_threshold = get_esi_threshold()
     da_pct_live   = get_da_percent() / Decimal('100')   # DA from settings, NOT structure
 
-    employees = User.objects.filter(is_active=True)
+    employees = User.objects.filter(is_active=True, tenant_id=payroll_run.tenant_id)
     if employee_ids:
         employees = employees.filter(id__in=employee_ids)
     created, skipped = [], []
 
     for emp in employees:
-        if PayrollEntry.objects.filter(payroll_run=payroll_run, employee=emp).exists():
+        if PayrollEntry.objects.filter(payroll_run=payroll_run, employee=emp, tenant_id=payroll_run.tenant_id).exists():
             continue
 
         structure = get_active_structure(emp, as_of)
@@ -708,6 +733,7 @@ def process_payroll_run(payroll_run: PayrollRun, employee_ids=None):
         net_pay          = max(ROUND2(gross - total_deductions), Decimal('0'))
 
         entry = PayrollEntry.objects.create(
+            tenant_id         = payroll_run.tenant_id,
             payroll_run       = payroll_run,
             employee          = emp,
             salary_structure  = structure,
