@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { TaskProvider, useTasks } from './context/TaskContext';
-import TaskSidebar from './components/TaskSidebar';
 import Dashboard from './pages/Dashboard';
 import TaskList from './pages/TaskList';
 import Kanban from './pages/Kanban';
@@ -11,7 +10,7 @@ import MyTasks from './pages/MyTasks';
 import NotificationsPage from './pages/NotificationsPage';
 import { MEMBERS } from './data/mockData';
 import {
-  Sun, Moon, Menu, Bell, ChevronDown, AlertOctagon,
+  Sun, Moon, Bell, ChevronDown, AlertOctagon,
   Loader2, Sparkles
 } from 'lucide-react';
 
@@ -22,11 +21,19 @@ function TaskAppContent() {
     isLoading, setIsLoading, errorState, setErrorState, tasks
   } = useTasks();
 
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [showDemoTools, setShowDemoTools] = useState(false);
 
   const unreadCount = notifications.filter(n => !n.read).length;
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'tasks-list', label: 'Task List' },
+    { id: 'kanban', label: 'Kanban' },
+    { id: 'calendar', label: 'Calendar' },
+    { id: 'my-tasks', label: 'My Tasks' },
+    { id: 'create-task', label: 'Create Task' },
+    { id: 'notifications', label: 'Notifications', badge: unreadCount },
+  ];
 
   const renderActivePage = () => {
     if (errorState) {
@@ -70,22 +77,14 @@ function TaskAppContent() {
   };
 
   return (
-    <div className="h-full min-h-0 overflow-hidden bg-slate-50 dark:bg-slate-950 font-sans flex transition-colors duration-300">
-      {/* Task Module Sidebar */}
-      <TaskSidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-
-      {/* Main content */}
-      <div className="flex-1 lg:pl-64 flex flex-col min-w-0 min-h-0 overflow-hidden">
+    <div className="min-h-full bg-slate-50 dark:bg-slate-950 font-sans transition-colors duration-300">
+      <div className="flex min-h-full min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-soft dark:border-slate-800 dark:bg-slate-950">
         {/* Task Module Topbar */}
-        <header className="flex-shrink-0 z-30 flex items-center justify-between px-4 sm:px-6 py-4 bg-white/70 dark:bg-slate-950/70 border-b border-slate-200/80 dark:border-slate-800/80 backdrop-blur-md">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-900 rounded-xl lg:hidden text-slate-500 cursor-pointer">
-              <Menu size={20} />
-            </button>
+        <header className="flex-shrink-0 z-30 border-b border-slate-200/80 bg-white/80 px-4 py-4 backdrop-blur-md dark:border-slate-800/80 dark:bg-slate-950/80 sm:px-6">
+          <div className="flex items-center justify-between gap-4">
             <h1 className="text-base font-extrabold text-slate-800 dark:text-slate-100 tracking-tight hidden sm:block">{getPageTitle()}</h1>
-          </div>
 
-          <div className="flex items-center gap-3.5">
+            <div className="flex items-center gap-3.5">
             {/* Demo tools */}
             <div className="relative">
               <button onClick={() => setShowDemoTools(!showDemoTools)} className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 border border-indigo-100 dark:border-indigo-900/60 rounded-xl text-[10px] font-bold text-indigo-600 dark:text-indigo-400 transition-colors cursor-pointer">
@@ -157,6 +156,31 @@ function TaskAppContent() {
               )}
             </div>
           </div>
+          </div>
+
+          <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+            {navItems.map((item) => {
+              const active = activePage === item.id || (item.id === 'tasks-list' && activePage === 'task-details');
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActivePage(item.id)}
+                  className={`relative flex-shrink-0 rounded-xl px-3.5 py-2 text-xs font-bold transition-all ${
+                    active
+                      ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-950 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+                  }`}
+                >
+                  {item.label}
+                  {item.badge > 0 && (
+                    <span className="ml-2 inline-flex min-w-[18px] items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[10px] font-black text-white">
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
         </header>
 
         {/* Loading overlay */}
@@ -170,10 +194,8 @@ function TaskAppContent() {
         )}
 
         {/* Page content */}
-        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-slate-950 custom-scrollbar">
-          <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 md:p-8">
-            {renderActivePage()}
-          </div>
+        <main className="bg-slate-50 p-4 dark:bg-slate-950 sm:p-6 md:p-8">
+          {renderActivePage()}
         </main>
       </div>
     </div>

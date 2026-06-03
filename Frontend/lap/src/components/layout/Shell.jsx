@@ -6,7 +6,7 @@ import Topbar from './Topbar'
 export default function Shell() {
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
-  const isAffiliateArea = pathname.startsWith('/dashboard/affiliate') || pathname.startsWith('/dashboard/tasks')
+  const isAffiliateArea = pathname.startsWith('/dashboard/affiliate')
 
   return (
     <div className="h-screen overflow-hidden bg-slate-50 text-slate-900">
