@@ -23,6 +23,7 @@
 
 export const NAV_ITEMS = [
   { label: 'Dashboard',       path: '/dashboard',                 icon: '/icons/dashboard.png',       always: true },
+  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate', icon: '/icons/affiliate.png', always: true },
   { label: 'Employees',       path: '/dashboard/employees',       icon: '/icons/employees.png',       codes: ['view_employees', 'create_employee'] },
   { label: 'Departments',     path: '/dashboard/departments',     icon: '/icons/departments.png',     codes: ['view_departments', 'create_department'] },
   { label: 'Attendance',      path: '/dashboard/attendance',      icon: '/icons/attendance.png',      codes: ['view_attendance', 'view_team_attendance'] },
@@ -31,7 +32,7 @@ export const NAV_ITEMS = [
   { label: 'Support Tickets', path: '/dashboard/support-tickets', icon: '/icons/notifications.png',   codes: ['raise_support_ticket', 'view_support_tickets', 'manage_support_tickets'] },
   { label: 'Reports',         path: '/dashboard/reports',         icon: '/icons/reports.png',         codes: ['view_reports'] },
   { label: 'Self Reports',    path: '/dashboard/self-reports',    icon: '/icons/reports.png',         codes: ['self_reports'] },
-  // { label: 'Permissions',  path: '/dashboard/permissions',     icon: '/icons/permissions.png',     codes: ['manage_permissions'] },
+  { label: 'Permissions',     path: '/dashboard/permissions',     icon: '/icons/permissions.png',     codes: ['manage_permissions'] },
   { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png',   always: true },
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png',        always: true },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png', codes: ['manage_settings'] },
@@ -48,10 +49,11 @@ export const SUPERADMIN_NAV = [
   { label: 'Support Tickets', path: '/dashboard/support-tickets', icon: '/icons/notifications.png'    },
   { label: 'Reports',         path: '/dashboard/reports',         icon: '/icons/reports.png'          },
   { label: 'Self Reports',    path: '/dashboard/self-reports',    icon: '/icons/reports.png'          },
-  // { label: 'Permissions',  path: '/dashboard/permissions',     icon: '/icons/permissions.png'      },
+  { label: 'Permissions',     path: '/dashboard/permissions',     icon: '/icons/permissions.png'      },
   { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png'    },
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png'         },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png'  },
+  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate',       icon: '/icons/affiliate.png'         },
 ]
 
 export default { superadmin: SUPERADMIN_NAV, admin: SUPERADMIN_NAV }

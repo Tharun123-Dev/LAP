@@ -2,7 +2,7 @@ import { useSelector } from 'react-redux'
 import { Navigate } from 'react-router-dom'
 
 const ProtectedRoute = ({ children, requiredPermission, requiredAny }) => {
-  const { access, permissions, role } = useSelector((s) => s.auth)
+  const { access, permissions = [], role } = useSelector((s) => s.auth)
 
   if (!access) return <Navigate to="/login" replace />
 
@@ -12,7 +12,7 @@ const ProtectedRoute = ({ children, requiredPermission, requiredAny }) => {
   }
 
   if (requiredAny?.length) {
-    const allowed = role === 'superadmin' || requiredAny.some(code => permissions.includes(code))
+    const allowed = role === 'superadmin' || requiredAny.some((code) => permissions.includes(code))
     if (!allowed) return <Navigate to="/unauthorized" replace />
   }
 

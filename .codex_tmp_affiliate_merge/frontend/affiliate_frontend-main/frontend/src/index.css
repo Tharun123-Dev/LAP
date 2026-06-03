@@ -1,0 +1,106 @@
+/* Google Fonts — must be first @import in file */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+/* ============================================
+   TAILWIND CSS DIRECTIVES
+   ============================================ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   BASE LAYER
+   ============================================ */
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  }
+
+  body.dark {
+    @apply bg-slate-950 text-slate-50;
+  }
+
+  ::selection {
+    @apply bg-primary-500 text-white;
+  }
+}
+
+/* ============================================
+   COMPONENT LAYER
+   ============================================ */
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border border-slate-200/50 dark:border-slate-800/50 shadow-sm transition-all duration-300;
+  }
+
+  .glass-card-hover {
+    @apply hover:shadow-lg hover:border-slate-300/50 hover:-translate-y-0.5;
+  }
+
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+
+  /* Shimmer loading skeleton */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(226, 232, 240, 0.5) 25%,
+      rgba(241, 245, 249, 0.8) 50%,
+      rgba(226, 232, 240, 0.5) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmerAnim 1.6s infinite linear;
+  }
+}
+
+/* ============================================
+   UTILITIES LAYER
+   ============================================ */
+@layer utilities {
+  /* Active sidebar nav glow indicator */
+  .active-nav-glow {
+    position: relative;
+  }
+
+  .active-nav-glow::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 15%;
+    height: 70%;
+    width: 4px;
+    background: theme('colors.primary.500');
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 10px theme('colors.primary.500');
+  }
+
+  /* Floating animation */
+  .animate-float {
+    animation: floating 4s ease-in-out infinite;
+  }
+}
+
+/* ============================================
+   KEYFRAME ANIMATIONS
+   ============================================ */
+@keyframes shimmerAnim {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes floating {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
