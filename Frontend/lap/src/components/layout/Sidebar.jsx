@@ -9,6 +9,7 @@ import {
   Handshake,
   HelpCircle,
   KeyRound,
+  ListTodo,
   LogOut,
   Settings,
   SlidersHorizontal,
@@ -36,6 +37,7 @@ const iconByLabel = {
   Notifications: Bell,
   Settings: Settings,
   'System Settings': SlidersHorizontal,
+  Tasks: ListTodo,
 }
 
 function NavIcon({ item }) {

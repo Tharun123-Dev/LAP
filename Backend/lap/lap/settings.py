@@ -40,6 +40,8 @@ INSTALLED_APPS = [
     'notifications',
     'support_tickets',
     'affiliate',
+    'leads',
+    
 ]
 
 AUTH_USER_MODEL = 'accounts.User'

@@ -36,6 +36,7 @@ export const NAV_ITEMS = [
   { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png',   always: true },
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png',        always: true },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png', codes: ['manage_settings'] },
+  { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks', always: true },
 ]
 
 // Superadmin sees everything always (bypasses permission check)
@@ -54,6 +55,7 @@ export const SUPERADMIN_NAV = [
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png'         },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png'  },
   { label: 'Affiliate Dashboard', path: '/dashboard/affiliate',       icon: '/icons/affiliate.png'         },
+  { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks' },
 ]
 
 export default { superadmin: SUPERADMIN_NAV, admin: SUPERADMIN_NAV }

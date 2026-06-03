@@ -42,7 +42,8 @@ import AffiliateAuthShell   from './affiliate/layouts/AffiliateAuthShell'
 import { AffiliateAuthProvider } from './affiliate/context/AffiliateAuthContext'
 import { ThemeProvider } from './affiliate/context/ThemeContext'
 import { NotificationProvider } from './affiliate/context/NotificationContext'
-
+// ── Task Module import ────────────────────────────────────────────────────
+import TaskShell from './tasks/TaskShell'
 const AffiliateProviders = ({ children }) => (
   <ThemeProvider>
     <NotificationProvider>
@@ -62,7 +63,12 @@ export default function App() {
 
         {/* Public: customer referral register page */}
         <Route path="/register"     element={<AffiliateProviders><CustomerRegister /></AffiliateProviders>} />
-
+        {/* ── Task Module ──────────────────────────────────────────── */}
+          <Route path="tasks" element={
+            <ProtectedRoute>
+              <TaskShell />
+            </ProtectedRoute>
+          } />
         {/* Public: new affiliate self-register */}
         <Route path="/affiliate/register" element={<AffiliateProviders><AffiliateAuthShell><AffiliateRegister /></AffiliateAuthShell></AffiliateProviders>} />
 
@@ -82,6 +88,7 @@ export default function App() {
           <Route path="settings"       element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
           <Route path="settings/system" element={<ProtectedRoute><SystemSettings /></ProtectedRoute>} />
           <Route path="permissions"    element={<ProtectedRoute requiredPermission="manage_permissions"><PermissionManager /></ProtectedRoute>} />
+          <Route path="tasks"          element={<ProtectedRoute><TaskShell /></ProtectedRoute>} />
 
           {/* ── Affiliate Dashboard (new, nested inside LAP shell) ──── */}
           <Route path="affiliate" element={
