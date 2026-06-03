@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Mail, Lock, Phone, MapPin, CreditCard, ArrowRight, ArrowLeft, Eye, EyeOff, Sparkles } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -28,6 +28,8 @@ export const Register = () => {
   const { register } = useAuth();
   const { addNotification } = useNotifications();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const nextPath = searchParams.get('next');
 
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -94,8 +96,9 @@ export const Register = () => {
         bankDetails: formData.bankDetails,
         upiId: formData.upiId,
       });
-      addNotification('Account created successfully! Please login to continue.', 'success');
-      navigate('/login');
+      localStorage.setItem('affiliate_onboarded', 'true');
+      addNotification('Affiliate signup completed successfully!', 'success');
+      navigate(nextPath || '/login', { replace: true });
     } catch (err) {
       addNotification(err.message || 'Registration failed. Please try again.', 'error');
     } finally {
@@ -297,7 +300,7 @@ export const Register = () => {
 
       <div className="text-center text-xs font-semibold text-slate-500">
         Already have an account?{' '}
-        <Link to="/auth/login" className="text-primary-500 hover:underline">
+        <Link to="/login" className="text-primary-500 hover:underline">
           Sign In
         </Link>
       </div>

@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { useSelector, useDispatch } from 'react-redux'
+import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -18,6 +17,7 @@ import {
   X,
 } from 'lucide-react'
 import { logout } from '../../store/authSlice'
+import { store } from '../../store'
 import { NAV_ITEMS, SUPERADMIN_NAV } from '../../config/navigation'
 
 const iconFallback = (label) => label?.charAt(0)?.toUpperCase() || '?'
@@ -65,12 +65,16 @@ function NavIcon({ item }) {
 }
 
 export default function Sidebar({ open, onClose }) {
-  const dispatch = useDispatch()
   const navigate = useNavigate()
   const location = useLocation()
-  const role = useSelector((s) => s.auth.role) || 'employee'
-  const user = useSelector((s) => s.auth.user)
-  const permissions = useSelector((s) => s.auth.permissions) || []
+  const [auth, setAuth] = useState(() => store.getState().auth || {})
+
+  useEffect(() => {
+    return store.subscribe(() => setAuth(store.getState().auth || {}))
+  }, [])
+
+  const role = auth.role || 'employee'
+  const user = auth.user
 
   const items = role === 'superadmin' || role === 'admin'
     ? SUPERADMIN_NAV
@@ -82,7 +86,7 @@ export default function Sidebar({ open, onClose }) {
   }
 
   const handleLogout = () => {
-    dispatch(logout())
+    store.dispatch(logout())
     navigate('/login')
   }
 

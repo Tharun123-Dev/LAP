@@ -14,6 +14,7 @@ const SUBSCRIPTION_PLANS = [
   { id: 'enterprise', name: 'Enterprise Plan', price: 4999, description: 'Ultimate power for corporations.', features: ['Unlimited Users', 'Real-time Analytics Custom APIs', 'Dedicated Success Manager', 'Uncapped Storage Space', 'Custom SLA / Security'] },
   { id: 'none', name: 'No Plan', price: 0, description: 'Register account now and subscribe later.', features: ['Free Account Registration', 'Zero Charges Today', 'Subscribe Later'] }
 ];
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
 
 export const CustomerRegister = () => {
   const [searchParams] = useSearchParams();
@@ -97,13 +98,15 @@ export const CustomerRegister = () => {
 
     setLoading(true);
     try {
-      await api.post('/affiliate/referrals/register-customer/', {
-        customer_name: customerName,
-        customer_email: customerEmail,
-        referral_code: referralCode,
-        product_name: selectedPlan.name,
-        purchase_amount: selectedPlan.price
-      });
+      if (USE_API) {
+        await api.post('/affiliate/referrals/register-customer/', {
+          customer_name: customerName,
+          customer_email: customerEmail,
+          referral_code: referralCode,
+          product_name: selectedPlan.name,
+          purchase_amount: selectedPlan.price
+        });
+      }
       setSuccess(true);
       addNotification('Subscription configured successfully!', 'success');
     } catch (err) {

@@ -38,11 +38,17 @@ export const AffiliateAuthProvider = ({ children }) => {
 
   const register = useCallback(async (registerData) => {
     const created = await authService.register(registerData);
+    setAffiliateUser(created);
+    localStorage.setItem('affiliate_onboarded', 'true');
+    if (created?.referralCode) {
+      localStorage.setItem('affiliate_ref_code', created.referralCode);
+    }
     return created;
   }, []);
 
   const logout = useCallback(() => {
     setAffiliateUser(null);
+    localStorage.removeItem('affiliate_onboarded');
     localStorage.removeItem('affiliate_ref_code');
   }, []);
 

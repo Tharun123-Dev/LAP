@@ -4,6 +4,29 @@ import affiliateApi from './affiliateApi';
 
 const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
 
+const getCurrentLapProfile = () => {
+  const userId = localStorage.getItem('user_id') || 'lap-user';
+  const name = localStorage.getItem('name') || 'LAP User';
+  const role = localStorage.getItem('role') || 'employee';
+  const employeeType = localStorage.getItem('employee_type') || '';
+  const referralSeed = String(userId || name).replace(/[^a-z0-9]/gi, '').slice(-6).toUpperCase() || 'USER01';
+
+  return {
+    ...mockUser,
+    id: userId,
+    name,
+    email: localStorage.getItem('email') || `${String(name).toLowerCase().replace(/\s+/g, '.')}@lap.local`,
+    role,
+    referralCode: `LAP${referralSeed}`,
+    tier: employeeType || role,
+    avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=7c3aed&color=fff`,
+    bankDetails: {
+      ...mockUser.bankDetails,
+      holderName: name,
+    },
+  };
+};
+
 const mapProfile = (data) => ({
   id: data.id,
   name: data.full_name || data.name || '',
@@ -40,20 +63,37 @@ export const authService = {
       bank_account_details: registerData.bankDetails || '',
       upi_id: registerData.upiId || '',
     };
-    return affiliateApi.post('/affiliate/auth/register/', payload);
+    if (!USE_API) {
+      const created = mapProfile({
+        ...mockUser,
+        id: `aff_${Date.now()}`,
+        name: registerData.name,
+        email: registerData.email,
+        phone: registerData.phone,
+        address: registerData.address,
+        upiId: registerData.upiId,
+        referralCode: `AFF${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      });
+      localStorage.setItem('affiliate_ref_code', created.referralCode);
+      return created;
+    }
+    const data = await affiliateApi.post('/affiliate/auth/register/', payload);
+    return mapProfile(data);
   },
 
   getCurrentUser: async () => {
     if (!USE_API) {
-      localStorage.setItem('affiliate_ref_code', mockUser.referralCode);
-      return mapProfile(mockUser);
+      const currentUser = getCurrentLapProfile();
+      localStorage.setItem('affiliate_ref_code', currentUser.referralCode);
+      return mapProfile(currentUser);
     }
     try {
       const data = await affiliateApi.get('/affiliate/profile/');
       return mapProfile(data);
     } catch {
-      localStorage.setItem('affiliate_ref_code', mockUser.referralCode);
-      return mapProfile(mockUser);
+      const currentUser = getCurrentLapProfile();
+      localStorage.setItem('affiliate_ref_code', currentUser.referralCode);
+      return mapProfile(currentUser);
     }
   },
 
@@ -68,14 +108,15 @@ export const authService = {
       profile_image_url: profileData.avatar,
     };
     if (!USE_API) {
+      const currentUser = getCurrentLapProfile();
       return mapProfile({
-        ...mockUser,
+        ...currentUser,
         phone: profileData.phone,
         address: profileData.address,
         upiId: profileData.upiId,
-        avatar: profileData.avatar || mockUser.avatar,
+        avatar: profileData.avatar || currentUser.avatar,
         bankDetails: {
-          ...mockUser.bankDetails,
+          ...currentUser.bankDetails,
           bankName: profileData.bankName,
           accountNumber: profileData.accountNumber,
           payoutMethod: profileData.payoutMethod,
@@ -86,14 +127,15 @@ export const authService = {
       const data = await affiliateApi.put('/affiliate/profile/', payload);
       return mapProfile(data);
     } catch {
+      const currentUser = getCurrentLapProfile();
       return mapProfile({
-        ...mockUser,
+        ...currentUser,
         phone: profileData.phone,
         address: profileData.address,
         upiId: profileData.upiId,
-        avatar: profileData.avatar || mockUser.avatar,
+        avatar: profileData.avatar || currentUser.avatar,
         bankDetails: {
-          ...mockUser.bankDetails,
+          ...currentUser.bankDetails,
           bankName: profileData.bankName,
           accountNumber: profileData.accountNumber,
           payoutMethod: profileData.payoutMethod,

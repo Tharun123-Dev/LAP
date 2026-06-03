@@ -38,6 +38,7 @@ import AffiliateSettings    from './affiliate/pages/settings/AppearanceSettings'
 import AffiliatePreferences from './affiliate/pages/settings/Preferences'
 import AffiliateRegister    from './affiliate/pages/auth/Register'
 import CustomerRegister     from './affiliate/pages/auth/CustomerRegister'
+import AffiliateAuthShell   from './affiliate/layouts/AffiliateAuthShell'
 import { AffiliateAuthProvider } from './affiliate/context/AffiliateAuthContext'
 import { ThemeProvider } from './affiliate/context/ThemeContext'
 import { NotificationProvider } from './affiliate/context/NotificationContext'
@@ -63,7 +64,7 @@ export default function App() {
         <Route path="/register"     element={<AffiliateProviders><CustomerRegister /></AffiliateProviders>} />
 
         {/* Public: new affiliate self-register */}
-        <Route path="/affiliate/register" element={<AffiliateProviders><AffiliateRegister /></AffiliateProviders>} />
+        <Route path="/affiliate/register" element={<AffiliateProviders><AffiliateAuthShell><AffiliateRegister /></AffiliateAuthShell></AffiliateProviders>} />
 
         {/* ── LAP Dashboard (unchanged) ───────────────────────────────── */}
         <Route path="/dashboard" element={<ProtectedRoute><Shell /></ProtectedRoute>}>
