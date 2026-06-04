@@ -1,33 +1,25 @@
 // src/affiliate/services/affiliateApi.js
-import axios from 'axios';
+// Reuse LAP's authenticated API client so Affiliate uses the same JWT,
+// refresh behavior, and base URL as the rest of the system.
+import api from '../../api/axios';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://lap-b9vi.onrender.com/api';
+const unwrap = (promise) =>
+  promise
+    .then((response) => response.data)
+    .catch((error) => {
+      const message =
+        error.response?.data?.detail ||
+        error.response?.data?.message ||
+        'An unexpected error occurred';
+      throw new Error(message);
+    });
 
-const affiliateApi = axios.create({
-  baseURL: BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-// Use LAP's JWT token key ('access') — same token, single login
-affiliateApi.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
-
-affiliateApi.interceptors.response.use(
-  (response) => response.data,
-  (error) => {
-    const message =
-      error.response?.data?.detail ||
-      error.response?.data?.message ||
-      'An unexpected error occurred';
-    if (error.response?.status === 401) {
-      localStorage.clear();
-      window.location.href = '/login';
-    }
-    return Promise.reject(new Error(message));
-  }
-);
+const affiliateApi = {
+  get: (url, config) => unwrap(api.get(url, config)),
+  post: (url, data, config) => unwrap(api.post(url, data, config)),
+  put: (url, data, config) => unwrap(api.put(url, data, config)),
+  patch: (url, data, config) => unwrap(api.patch(url, data, config)),
+  delete: (url, config) => unwrap(api.delete(url, config)),
+};
 
 export default affiliateApi;

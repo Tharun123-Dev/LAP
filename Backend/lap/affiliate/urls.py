@@ -8,6 +8,7 @@ from .views import (
     RegisterCustomerView,
     CommissionListView,
     PaymentListView,
+    PaymentProcessView,
     DashboardStatsView,
     ReferralGrowthView,
     EarningsPerformanceView,
@@ -33,6 +34,7 @@ urlpatterns = [
 
     # Payments
     path('affiliate/payments/',                        PaymentListView.as_view()),
+    path('affiliate/payments/<uuid:pk>/process/',      PaymentProcessView.as_view()),
 
     # Analytics
     path('affiliate/analytics/dashboard-stats/',       DashboardStatsView.as_view()),

@@ -94,7 +94,7 @@ export const PaymentHistory = () => {
               </thead>
               <tbody className="divide-y divide-slate-100/50 dark:divide-slate-800/50">
                 {payments?.map((pay) => (
-                  <tr key={pay.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors cursor-pointer" onClick={() => navigate(`/payments/${pay.id}`)}>
+                  <tr key={pay.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors cursor-pointer" onClick={() => navigate(`/dashboard/affiliate/payments/${pay.id}`)}>
                     <td className="py-4 pl-2 font-bold text-slate-900 dark:text-white">
                       {pay.invoiceNumber}
                     </td>

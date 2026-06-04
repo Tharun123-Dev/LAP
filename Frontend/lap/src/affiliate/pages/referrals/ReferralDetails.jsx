@@ -22,7 +22,7 @@ export const ReferralDetails = () => {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <p className="font-bold text-rose-500">Error loading client detail: {error}</p>
-        <Link to="/referrals">
+        <Link to="/dashboard/affiliate/referrals">
           <Button variant="secondary" icon={ArrowLeft}>Back to Referrals</Button>
         </Link>
       </div>
@@ -32,7 +32,7 @@ export const ReferralDetails = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/referrals" className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+        <Link to="/dashboard/affiliate/referrals" className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
           <ArrowLeft className="w-4.5 h-4.5" />
         </Link>
         <div>
@@ -108,7 +108,7 @@ export const ReferralDetails = () => {
               <h4 className="font-bold text-sm border-b border-slate-100 dark:border-slate-800 pb-3">Marketing Campaign Triggers</h4>
               
               <div className="space-y-4 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                <p>This client completed user onboarding following a dynamic trigger matching the <span className="text-primary-500 font-bold">SARAH50X</span> campaign link. A commission percentage allocation rule was applied to their account.</p>
+                <p>This client completed user onboarding through your referral campaign. A commission percentage allocation rule was applied to their account.</p>
                 
                 <div className="p-4 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200/50 dark:border-slate-800/50">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Technical Trigger logs</p>

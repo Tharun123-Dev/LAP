@@ -1,0 +1,296 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 999 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(LAP System Permission-Based Module Workflows) Tj
+T*
+() Tj
+T*
+(Login and permissions) Tj
+T*
+(1. Admin or Superadmin creates an employee in LAP.) Tj
+T*
+(2. Admin grants per-employee permissions from Permission Manager.) Tj
+T*
+(3. Employee logs in and receives permission codes in the JWT/auth state.) Tj
+T*
+(4. Sidebar and module screens show only workflows allowed by those codes.) Tj
+T*
+(5. Backend APIs also check the same permission codes, so hidden UI is not the only protectio) Tj
+T*
+(n.) Tj
+T*
+() Tj
+T*
+(Admin and Superadmin) Tj
+T*
+(- Full access by role.) Tj
+T*
+(- Can see all modules and all protected workflows.) Tj
+T*
+() Tj
+T*
+(Managers, HR, Employees) Tj
+T*
+(- See only explicitly granted UserPermissionOverride permissions.) Tj
+T*
+(- Example: view_tasks shows own task dashboard and my tasks only.) Tj
+T*
+(- Example: create_task shows create task workflow but not full team task board unless view_t) Tj
+T*
+(eam_tasks or assign_task is also granted.) Tj
+T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 1019 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(Tasks Module Flow) Tj
+T*
+() Tj
+T*
+(Permissions) Tj
+T*
+(- view_tasks: own task dashboard, my tasks, notifications.) Tj
+T*
+(- view_team_tasks: task list, kanban, calendar, team task dashboard.) Tj
+T*
+(- create_task: create task workflow.) Tj
+T*
+(- edit_task: update task details/status.) Tj
+T*
+(- delete_task: delete tasks.) Tj
+T*
+(- assign_task: assign tasks and see team task workflows.) Tj
+T*
+() Tj
+T*
+(Assignment workflow) Tj
+T*
+(1. Admin/manager/HR with create_task or assign_task opens Tasks.) Tj
+T*
+(2. Create Task loads active employees from /api/tasks/members/.) Tj
+T*
+(3. Assigner selects employee, priority, due date, related module, and saves.) Tj
+T*
+(4. Backend stores task with assigned_by and assigned_to.) Tj
+T*
+(5. Assigned employee with view_tasks sees it in own task dashboard/my tasks.) Tj
+T*
+(6. Team users with view_team_tasks or assign_task see all tenant tasks.) Tj
+T*
+(7. Comments, status changes, archive, and notifications are saved through backend APIs.) Tj
+T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 1011 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(Leads and Follow Ups Flow) Tj
+T*
+() Tj
+T*
+(Permissions) Tj
+T*
+(- view_leads: see assigned leads or all leads if also assign_lead/view_lead_analytics.) Tj
+T*
+(- create_lead: add lead.) Tj
+T*
+(- edit_lead: edit lead.) Tj
+T*
+(- delete_lead: delete lead.) Tj
+T*
+(- assign_lead: assign counselors and view broader lead pool.) Tj
+T*
+(- view_followups: see follow-up records.) Tj
+T*
+(- create_followup: log lead conversations and reminders.) Tj
+T*
+(- manage_lead_forms: form builder.) Tj
+T*
+(- view_lead_analytics: analytics dashboard.) Tj
+T*
+() Tj
+T*
+(Lead workflow) Tj
+T*
+(1. User with create_lead adds a lead using active intake form.) Tj
+T*
+(2. If user lacks assign_lead, backend assigns the lead to that user.) Tj
+T*
+(3. User with view_leads sees only allowed leads.) Tj
+T*
+(4. User with create_followup logs conversation from Lead Details.) Tj
+T*
+(5. Follow Ups page shows pending/completed follow-up actions.) Tj
+T*
+(6. Analytics is visible only with view_lead_analytics.) Tj
+T*
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 1108 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(Revenue and Affiliate Flow) Tj
+T*
+() Tj
+T*
+(Revenue permissions) Tj
+T*
+(- view_revenue: open Revenue dashboard.) Tj
+T*
+(- manage_revenue: future management workflow access.) Tj
+T*
+() Tj
+T*
+(Revenue workflow) Tj
+T*
+(1. Revenue dashboard calls /api/revenue/overview/.) Tj
+T*
+(2. Backend checks view_revenue.) Tj
+T*
+(3. Revenue is calculated from lead fields named Revenue, Fee, Course Fee, or Amount.) Tj
+T*
+(4. Admission Confirmed leads count as confirmed revenue.) Tj
+T*
+(5. Interested and Follow-Up Pending leads count as pipeline revenue.) Tj
+T*
+() Tj
+T*
+(Affiliate permissions) Tj
+T*
+(- view_affiliate: open affiliate dashboard workflows.) Tj
+T*
+(- manage_affiliate: manage affiliate workflows.) Tj
+T*
+() Tj
+T*
+(Affiliate workflow) Tj
+T*
+(1. Sidebar shows Affiliate only when permission is granted.) Tj
+T*
+(2. Affiliate backend endpoints require view_affiliate or manage_affiliate.) Tj
+T*
+(3. Public affiliate/customer registration remains public.) Tj
+T*
+(4. Dashboard, referrals, commissions, payments, profile, and notifications are permission-pr) Tj
+T*
+(otected.) Tj
+T*
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 920 >>
+stream
+BT
+/F1 11 Tf
+50 780 Td
+14 TL
+(Operational Checklist) Tj
+T*
+() Tj
+T*
+(After code update) Tj
+T*
+(1. Run backend migrations.) Tj
+T*
+(   python manage.py migrate) Tj
+T*
+(2. Seed permissions.) Tj
+T*
+(   python manage.py seed_permissions) Tj
+T*
+(3. Restart backend server.) Tj
+T*
+(4. Restart frontend dev server if needed.) Tj
+T*
+(5. Login as admin or superadmin.) Tj
+T*
+(6. Open Permission Manager.) Tj
+T*
+(7. Grant employee permissions by module.) Tj
+T*
+(8. Logout/login as employee to refresh token permissions.) Tj
+T*
+() Tj
+T*
+(Expected examples) Tj
+T*
+(- Employee with view_tasks only: sees Tasks, Dashboard, My Tasks, Notifications.) Tj
+T*
+(- Employee with create_task only: sees Create Task only.) Tj
+T*
+(- Counselor with view_leads and create_followup: sees leads and follow-ups they are allowed ) Tj
+T*
+(to access.) Tj
+T*
+(- Revenue user with view_revenue: sees Revenue dashboard without needing view_leads.) Tj
+T*
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 12 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R] /Count 5 >>
+endobj
+13 0 obj
+<< /Type /Catalog /Pages 12 0 R >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000001129 00000 n 
+0000001256 00000 n 
+0000002327 00000 n 
+0000002454 00000 n 
+0000003517 00000 n 
+0000003644 00000 n 
+0000004804 00000 n 
+0000004931 00000 n 
+0000005903 00000 n 
+0000006032 00000 n 
+0000006115 00000 n 
+trailer
+<< /Size 14 /Root 13 0 R >>
+startxref
+6166
+%%EOF

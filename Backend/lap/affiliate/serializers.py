@@ -54,37 +54,61 @@ class AffiliateRegisterSerializer(serializers.Serializer):
 
 
 class ReferralSerializer(serializers.ModelSerializer):
+    affiliate_name = serializers.SerializerMethodField()
+    affiliate_code = serializers.CharField(source='affiliate.referral_code', read_only=True)
+
     class Meta:
         model = Referral
         fields = [
-            'id', 'affiliate', 'customer_name', 'customer_email',
+            'id', 'affiliate', 'affiliate_name', 'affiliate_code', 'customer_name', 'customer_email',
             'status', 'purchase_amount', 'referred_at'
         ]
         read_only_fields = ['id', 'affiliate', 'referred_at']
 
+    def get_affiliate_name(self, obj):
+        return obj.affiliate.full_name
+
 
 class CommissionSerializer(serializers.ModelSerializer):
+    affiliate_name = serializers.SerializerMethodField()
+    customer_name = serializers.CharField(source='referral.customer_name', read_only=True)
+    customer_email = serializers.EmailField(source='referral.customer_email', read_only=True)
+
     class Meta:
         model = Commission
         fields = [
-            'id', 'referral', 'affiliate', 'amount',
+            'id', 'referral', 'affiliate', 'affiliate_name', 'customer_name', 'customer_email', 'amount',
             'status', 'payment_date', 'created_at'
         ]
         read_only_fields = ['id', 'affiliate', 'created_at']
 
+    def get_affiliate_name(self, obj):
+        return obj.affiliate.full_name
+
 
 class PaymentSerializer(serializers.ModelSerializer):
+    affiliate_name = serializers.SerializerMethodField()
+    affiliate_code = serializers.CharField(source='affiliate.referral_code', read_only=True)
+
     class Meta:
         model = Payment
         fields = [
-            'id', 'affiliate', 'amount', 'payment_method',
+            'id', 'affiliate', 'affiliate_name', 'affiliate_code', 'amount', 'payment_method',
             'transaction_id', 'status', 'paid_at'
         ]
         read_only_fields = ['id', 'affiliate', 'paid_at']
 
+    def get_affiliate_name(self, obj):
+        return obj.affiliate.full_name
+
 
 class AffiliateNotificationSerializer(serializers.ModelSerializer):
+    affiliate_name = serializers.SerializerMethodField()
+
     class Meta:
         model = AffiliateNotification
-        fields = ['id', 'affiliate', 'type', 'message', 'is_read', 'created_at']
+        fields = ['id', 'affiliate', 'affiliate_name', 'type', 'message', 'is_read', 'created_at']
         read_only_fields = ['id', 'affiliate', 'created_at']
+
+    def get_affiliate_name(self, obj):
+        return obj.affiliate.full_name

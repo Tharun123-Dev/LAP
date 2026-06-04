@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useTasks } from '../context/TaskContext';
-import { MEMBERS, TAGS, RELATED_MODULES } from '../data/mockData';
+import { TAGS } from '../data/mockData';
 import {
   Search,
   SlidersHorizontal,
@@ -35,7 +35,8 @@ export default function TaskList() {
     navigateToDetails,
     setSelectedTaskId,
     setActivePage,
-    currentUser
+    currentUser,
+    members,
   } = useTasks();
 
   // Local UI States
@@ -660,7 +661,7 @@ export default function TaskList() {
                   className="w-full px-3 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500/25"
                 >
                   <option value="">All Assignees</option>
-                  {MEMBERS.map(member => (
+                  {members.map(member => (
                     <option key={member.id} value={member.id}>{member.name}</option>
                   ))}
                 </select>

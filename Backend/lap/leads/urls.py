@@ -7,6 +7,7 @@ urlpatterns = [
     path('leads/forms/<int:form_id>/fields/', views.LeadFormFieldSyncView.as_view(), name='lead-form-fields-sync'),
     path('leads/forms/fields/', views.LeadFieldListCreateView.as_view(), name='lead-field-create'),
     path('leads/forms/fields/<int:field_id>/', views.LeadFieldDetailView.as_view(), name='lead-field-detail'),
+    path('leads/options/', views.LeadOptionListSaveView.as_view(), name='lead-options'),
 
     # Leads
     path('leads/', views.LeadListCreateView.as_view(), name='lead-list-create'),
@@ -19,6 +20,7 @@ urlpatterns = [
 
     # Analytics
     path('leads/analytics/dashboard/', views.LeadDashboardAnalyticsView.as_view(), name='lead-analytics'),
+    path('revenue/overview/', views.RevenueOverviewView.as_view(), name='revenue-overview'),
 
     # Users for dropdowns
     path('leads/users/', views.LeadUsersListView.as_view(), name='lead-users'),

@@ -24,7 +24,7 @@ export const InvoicePage = () => {
       {/* Header controls (Hidden on print) */}
       <div className="flex items-center justify-between gap-4 print:hidden">
         <div className="flex items-center gap-4">
-          <Link to={`/payments/${id}`} className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+          <Link to={`/dashboard/affiliate/payments/${id}`} className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
             <ArrowLeft className="w-4.5 h-4.5" />
           </Link>
           <div>

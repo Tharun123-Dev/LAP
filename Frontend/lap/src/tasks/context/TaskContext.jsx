@@ -1,5 +1,17 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useSelector } from 'react-redux';
 import { INITIAL_TASKS, INITIAL_NOTIFICATIONS, MEMBERS } from '../data/mockData';
+import {
+  addTaskCommentApi,
+  archiveTaskApi,
+  createTask,
+  deleteTaskApi,
+  fetchTaskMembers,
+  fetchTaskNotifications,
+  fetchTasks,
+  markTaskNotificationsRead,
+  updateTaskApi,
+} from '../services/tasksApi';
 
 const TaskContext = createContext();
 
@@ -10,21 +22,17 @@ export const useTasks = () => {
 };
 
 export const TaskProvider = ({ children }) => {
+  const auth = useSelector((state) => state.auth || {});
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem('task-theme');
     return saved ? saved === 'dark' : false;
   });
   const [activePage, setActivePage] = useState('dashboard');
   const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [members, setMembers] = useState(MEMBERS);
   const [currentUser, setCurrentUser] = useState(MEMBERS[2]);
-  const [tasks, setTasks] = useState(() => {
-    const saved = localStorage.getItem('crm-tasks');
-    return saved ? JSON.parse(saved) : INITIAL_TASKS;
-  });
-  const [notifications, setNotifications] = useState(() => {
-    const saved = localStorage.getItem('crm-notifications');
-    return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
-  });
+  const [tasks, setTasks] = useState(INITIAL_TASKS);
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const [isLoading, setIsLoading] = useState(false);
   const [errorState, setErrorState] = useState(null);
 
@@ -33,55 +41,106 @@ export const TaskProvider = ({ children }) => {
     else { document.documentElement.classList.remove('dark'); localStorage.setItem('task-theme', 'light'); }
   }, [darkMode]);
 
-  useEffect(() => { localStorage.setItem('crm-tasks', JSON.stringify(tasks)); }, [tasks]);
-  useEffect(() => { localStorage.setItem('crm-notifications', JSON.stringify(notifications)); }, [notifications]);
+  const normalizeMember = (member) => ({
+    ...member,
+    id: String(member.id),
+    name: member.name || member.full_name || member.username || 'User',
+    avatar: member.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(member.name || member.full_name || 'User')}&background=6366f1&color=fff`,
+  });
+
+  const normalizeTaskForApi = (task) => ({
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    startDate: task.startDate,
+    dueDate: task.dueDate,
+    assigned_to_id: task.assignedTo?.id || task.assignedToId,
+    tags: task.tags || [],
+    attachments: task.attachments || [],
+    relatedModule: task.relatedModule || '',
+    archived: !!task.archived,
+  });
+
+  const loadTaskData = async () => {
+    setIsLoading(true);
+    try {
+      const [tasksRes, membersRes, notificationsRes] = await Promise.allSettled([
+        fetchTasks(),
+        fetchTaskMembers(),
+        fetchTaskNotifications(),
+      ]);
+      const nextMembers = membersRes.status === 'fulfilled'
+        ? (membersRes.value.data || []).map(normalizeMember)
+        : MEMBERS;
+      setMembers(nextMembers.length ? nextMembers : MEMBERS);
+      if (tasksRes.status === 'fulfilled') setTasks(tasksRes.value.data || []);
+      if (notificationsRes.status === 'fulfilled') setNotifications(notificationsRes.value.data || []);
+      const loggedInId = auth.userId ? String(auth.userId) : null;
+      const loggedInUser = nextMembers.find((member) => String(member.id) === loggedInId);
+      if (loggedInUser) setCurrentUser(loggedInUser);
+      else if (nextMembers[0]) setCurrentUser(nextMembers[0]);
+      setErrorState(null);
+    } catch (error) {
+      console.error('[Tasks] Backend sync failed:', error);
+      setErrorState('Task backend is not reachable. Showing local demo data until API is available.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (auth.access) loadTaskData();
+  }, [auth.access, auth.userId]);
 
   const triggerLoading = (callback) => {
     setIsLoading(true);
     setTimeout(() => { callback(); setIsLoading(false); }, 450);
   };
 
-  const addTask = (newTask) => {
-    triggerLoading(() => {
-      const task = {
-        id: `TSK-${Math.floor(1000 + Math.random() * 9000)}`,
-        createdDate: new Date().toISOString().split('T')[0],
-        archived: false,
-        comments: [],
-        history: [{ id: `h-${Math.random().toString(36).substr(2,9)}`, user: currentUser.name, action: 'Task Created', details: `Task created and assigned to ${newTask.assignedTo.name}`, timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }],
-        ...newTask
-      };
-      setTasks(prev => [task, ...prev]);
-      if (task.assignedTo.id !== currentUser.id) {
-        setNotifications(prev => [{ id: `ntf-${Math.random().toString(36).substr(2,9)}`, type: 'assigned', taskTitle: task.title, taskId: task.id, sender: currentUser.name, timestamp: 'Just now', read: false, message: `assigned you a task: ${task.title}` }, ...prev]);
-      }
-    });
+  const addTask = async (newTask) => {
+    setIsLoading(true);
+    try {
+      const res = await createTask(normalizeTaskForApi(newTask));
+      setTasks(prev => [res.data, ...prev]);
+      const notificationsRes = await fetchTaskNotifications();
+      setNotifications(notificationsRes.data || []);
+    } catch (error) {
+      setErrorState(error?.response?.data?.detail || 'Failed to create task');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateTask = (updatedTask) => {
-    triggerLoading(() => {
-      setTasks(prev => prev.map(t => {
-        if (t.id !== updatedTask.id) return t;
-        const historyEntry = [];
-        if (t.status !== updatedTask.status) historyEntry.push({ id: `h-${Math.random().toString(36).substr(2,9)}`, user: currentUser.name, action: 'Status Updated', details: `Changed status from ${t.status} to ${updatedTask.status}`, timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
-        if (t.assignedTo.id !== updatedTask.assignedTo.id) historyEntry.push({ id: `h-${Math.random().toString(36).substr(2,9)}`, user: currentUser.name, action: 'Assignment Changed', details: `Reassigned task to ${updatedTask.assignedTo.name}`, timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
-        return { ...t, ...updatedTask, history: [...(t.history || []), ...historyEntry] };
-      }));
-    });
+  const updateTask = async (updatedTask) => {
+    setIsLoading(true);
+    try {
+      const res = await updateTaskApi(updatedTask.id, normalizeTaskForApi(updatedTask));
+      setTasks(prev => prev.map(t => t.id === updatedTask.id ? res.data : t));
+    } catch (error) {
+      setErrorState(error?.response?.data?.detail || 'Failed to update task');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateStatus = (taskId, newStatus) => {
-    setTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      return { ...t, status: newStatus, history: [...(t.history || []), { id: `h-${Math.random().toString(36).substr(2,9)}`, user: currentUser.name, action: 'Status Updated', details: `Quick status change to ${newStatus}`, timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }] };
-    }));
+  const updateStatus = async (taskId, newStatus) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    await updateTask({ ...task, status: newStatus });
   };
 
-  const deleteTask = (taskId) => {
-    triggerLoading(() => {
+  const deleteTask = async (taskId) => {
+    setIsLoading(true);
+    try {
+      await deleteTaskApi(taskId);
       setTasks(prev => prev.filter(t => t.id !== taskId));
       if (selectedTaskId === taskId) { setSelectedTaskId(null); setActivePage('tasks-list'); }
-    });
+    } catch (error) {
+      setErrorState(error?.response?.data?.detail || 'Failed to delete task');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const duplicateTask = (taskId) => {
@@ -94,21 +153,15 @@ export const TaskProvider = ({ children }) => {
     });
   };
 
-  const archiveTask = (taskId) => {
-    triggerLoading(() => { setTasks(prev => prev.map(t => t.id === taskId ? { ...t, archived: true } : t)); });
+  const archiveTask = async (taskId) => {
+    const res = await archiveTaskApi(taskId);
+    setTasks(prev => prev.map(t => t.id === taskId ? res.data : t));
   };
 
-  const addComment = (taskId, content) => {
+  const addComment = async (taskId, content) => {
     if (!content.trim()) return;
-    const newComment = { id: `c-${Math.random().toString(36).substr(2,9)}`, author: currentUser, content, timestamp: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) };
-    setTasks(prev => prev.map(t => {
-      if (t.id !== taskId) return t;
-      return { ...t, comments: [...(t.comments || []), newComment], history: [...(t.history || []), { id: `h-${Math.random().toString(36).substr(2,9)}`, user: currentUser.name, action: 'Comment Added', details: 'Added a discussion comment', timestamp: newComment.timestamp }] };
-    }));
-    if (content.includes('@')) {
-      const tsk = tasks.find(t => t.id === taskId);
-      setNotifications(prev => [{ id: `ntf-${Math.random().toString(36).substr(2,9)}`, type: 'mention', taskTitle: tsk?.title || '', taskId, sender: currentUser.name, timestamp: 'Just now', read: false, message: `mentioned you in a comment: "${content.substring(0,40)}..."` }, ...prev]);
-    }
+    const res = await addTaskCommentApi(taskId, content);
+    setTasks(prev => prev.map(t => t.id === taskId ? res.data : t));
   };
 
   const deleteComment = (taskId, commentId) => {
@@ -116,12 +169,15 @@ export const TaskProvider = ({ children }) => {
   };
 
   const markNotificationRead = (id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const markAllNotificationsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  const markAllNotificationsRead = async () => {
+    await markTaskNotificationsRead();
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
   const navigateToDetails = (taskId) => { setSelectedTaskId(taskId); setActivePage('task-details'); };
   const toggleDarkMode = () => setDarkMode(!darkMode);
 
   return (
-    <TaskContext.Provider value={{ darkMode, toggleDarkMode, activePage, setActivePage, selectedTaskId, setSelectedTaskId, currentUser, setCurrentUser, tasks, notifications, isLoading, setIsLoading, errorState, setErrorState, addTask, updateTask, updateStatus, deleteTask, duplicateTask, archiveTask, addComment, deleteComment, markNotificationRead, markAllNotificationsRead, navigateToDetails }}>
+    <TaskContext.Provider value={{ darkMode, toggleDarkMode, activePage, setActivePage, selectedTaskId, setSelectedTaskId, currentUser, setCurrentUser, members, tasks, notifications, isLoading, setIsLoading, errorState, setErrorState, addTask, updateTask, updateStatus, deleteTask, duplicateTask, archiveTask, addComment, deleteComment, markNotificationRead, markAllNotificationsRead, navigateToDetails, refreshTasks: loadTaskData }}>
       {children}
     </TaskContext.Provider>
   );

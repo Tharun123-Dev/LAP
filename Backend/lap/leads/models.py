@@ -37,6 +37,30 @@ class LeadForm(models.Model):
         return self.name
 
 
+class LeadOption(models.Model):
+    CATEGORY_CHOICES = [
+        ('status', 'Status'),
+        ('contact_method', 'Contact Method'),
+    ]
+
+    tenant_id = models.CharField(max_length=64, default='default', db_index=True)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES)
+    label = models.CharField(max_length=100)
+    value = models.CharField(max_length=100)
+    color = models.CharField(max_length=30, blank=True, default='')
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    is_system = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'lead_options'
+        ordering = ['category', 'sort_order', 'id']
+        unique_together = ['tenant_id', 'category', 'value']
+
+    def __str__(self):
+        return f"{self.category}: {self.label}"
+
+
 class LeadField(models.Model):
     form = models.ForeignKey(
         LeadForm, on_delete=models.CASCADE, related_name='fields'
@@ -66,6 +90,9 @@ class Lead(models.Model):
     status = models.CharField(
         max_length=50, choices=LeadStatus.choices, default=LeadStatus.NEW
     )
+    revenue_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    payment_status = models.CharField(max_length=50, default='Unpaid')
+    payment_reference = models.CharField(max_length=120, blank=True, default='')
     counselor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -78,7 +105,7 @@ class Lead(models.Model):
         on_delete=models.PROTECT,
         related_name='leads'
     )
-    tenant_id = models.IntegerField(null=True, blank=True, db_index=True)
+    tenant_id = models.CharField(max_length=64, default='default', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -117,7 +144,7 @@ class FollowUp(models.Model):
         related_name='lead_followups'
     )
     note = models.TextField()
-    scheduled_at = models.DateTimeField()
+    scheduled_at = models.DateTimeField(null=True, blank=True)
     completed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 

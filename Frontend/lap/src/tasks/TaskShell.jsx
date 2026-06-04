@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSelector } from 'react-redux';
 import { TaskProvider, useTasks } from './context/TaskContext';
 import Dashboard from './pages/Dashboard';
 import TaskList from './pages/TaskList';
@@ -8,32 +9,42 @@ import CreateTask from './pages/CreateTask';
 import TaskDetails from './pages/TaskDetails';
 import MyTasks from './pages/MyTasks';
 import NotificationsPage from './pages/NotificationsPage';
-import { MEMBERS } from './data/mockData';
 import {
   Sun, Moon, Bell, ChevronDown, AlertOctagon,
   Loader2, Sparkles
 } from 'lucide-react';
 
 function TaskAppContent() {
+  const { permissions = [], role } = useSelector((state) => state.auth || {});
   const {
     darkMode, toggleDarkMode, activePage, setActivePage,
-    currentUser, setCurrentUser, notifications,
+    currentUser, setCurrentUser, members, notifications,
     isLoading, setIsLoading, errorState, setErrorState, tasks
   } = useTasks();
 
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [showDemoTools, setShowDemoTools] = useState(false);
 
+  const hasAny = (...codes) => (
+    ['superadmin', 'admin'].includes(String(role || '').toLowerCase()) || codes.some((code) => permissions.includes(code))
+  );
+
   const unreadCount = notifications.filter(n => !n.read).length;
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'tasks-list', label: 'Task List' },
-    { id: 'kanban', label: 'Kanban' },
-    { id: 'calendar', label: 'Calendar' },
-    { id: 'my-tasks', label: 'My Tasks' },
-    { id: 'create-task', label: 'Create Task' },
-    { id: 'notifications', label: 'Notifications', badge: unreadCount },
-  ];
+  const navItems = useMemo(() => ([
+    hasAny('view_tasks', 'view_team_tasks', 'assign_task') && { id: 'dashboard', label: 'Dashboard' },
+    hasAny('view_team_tasks', 'assign_task') && { id: 'tasks-list', label: 'Task List' },
+    hasAny('view_team_tasks', 'assign_task') && { id: 'kanban', label: 'Kanban' },
+    hasAny('view_team_tasks', 'assign_task') && { id: 'calendar', label: 'Calendar' },
+    hasAny('view_tasks', 'view_team_tasks', 'assign_task') && { id: 'my-tasks', label: 'My Tasks' },
+    hasAny('create_task', 'assign_task') && { id: 'create-task', label: 'Create Task' },
+    hasAny('view_tasks', 'view_team_tasks', 'assign_task') && { id: 'notifications', label: 'Notifications', badge: unreadCount },
+  ]).filter(Boolean), [permissions, role, unreadCount]);
+
+  useEffect(() => {
+    if (!navItems.some((item) => item.id === activePage)) {
+      setActivePage(navItems[0]?.id || 'my-tasks');
+    }
+  }, [activePage, navItems, setActivePage]);
 
   const renderActivePage = () => {
     if (errorState) {
@@ -141,7 +152,7 @@ function TaskAppContent() {
                       <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 block">Switch User Role</span>
                       <span className="text-[10px] text-slate-405">Test role-based task visibility and personal queues</span>
                     </div>
-                    {MEMBERS.map((member) => (
+                    {members.map((member) => (
                       <button key={member.id} onClick={() => { setCurrentUser(member); setUserDropdownOpen(false); setIsLoading(true); setTimeout(() => setIsLoading(false), 300); }}
                         className={`w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-850 text-left transition-colors cursor-pointer ${currentUser.id === member.id ? 'bg-blue-50/40 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 font-bold' : 'text-slate-700 dark:text-slate-350'}`}>
                         <img src={member.avatar} alt={member.name} className="w-7 h-7 rounded-full object-cover" />

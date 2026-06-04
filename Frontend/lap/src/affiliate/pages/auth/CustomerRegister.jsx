@@ -14,7 +14,7 @@ const SUBSCRIPTION_PLANS = [
   { id: 'enterprise', name: 'Enterprise Plan', price: 4999, description: 'Ultimate power for corporations.', features: ['Unlimited Users', 'Real-time Analytics Custom APIs', 'Dedicated Success Manager', 'Uncapped Storage Space', 'Custom SLA / Security'] },
   { id: 'none', name: 'No Plan', price: 0, description: 'Register account now and subscribe later.', features: ['Free Account Registration', 'Zero Charges Today', 'Subscribe Later'] }
 ];
-const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API !== 'false';
 
 export const CustomerRegister = () => {
   const [searchParams] = useSearchParams();

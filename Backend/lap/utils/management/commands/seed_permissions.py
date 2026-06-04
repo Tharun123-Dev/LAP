@@ -45,6 +45,29 @@ ALL_PERMISSIONS = [
     ('view_support_tickets',        'Track own support tickets',   'support_tickets'),
     ('manage_support_tickets',      'Resolve all support tickets', 'support_tickets'),
     ('manage_support_ticket_types', 'Manage ticket issue types',   'support_tickets'),
+
+    ('view_affiliate',      'View affiliate dashboard',       'affiliate'),
+    ('manage_affiliate',    'Manage affiliate workflow',      'affiliate'),
+
+    ('view_leads',          'View leads',                     'leads'),
+    ('create_lead',         'Create leads',                   'leads'),
+    ('edit_lead',           'Edit leads',                     'leads'),
+    ('delete_lead',         'Delete leads',                   'leads'),
+    ('assign_lead',         'Assign leads to counselors',     'leads'),
+    ('view_followups',      'View lead follow ups',           'leads'),
+    ('create_followup',     'Create lead follow ups',         'leads'),
+    ('manage_lead_forms',   'Manage lead intake forms',       'leads'),
+    ('view_lead_analytics', 'View lead analytics',            'leads'),
+
+    ('view_tasks',          'View own tasks',                 'tasks'),
+    ('view_team_tasks',     'View team tasks',                'tasks'),
+    ('create_task',         'Create tasks',                   'tasks'),
+    ('edit_task',           'Edit tasks',                     'tasks'),
+    ('delete_task',         'Delete tasks',                   'tasks'),
+    ('assign_task',         'Assign tasks to employees',      'tasks'),
+
+    ('view_revenue',        'View revenue dashboard',         'revenue'),
+    ('manage_revenue',      'Manage revenue records',         'revenue'),
 ]
 
 ALL_CODES = [p[0] for p in ALL_PERMISSIONS]
@@ -60,6 +83,10 @@ ROLE_DEFAULTS = {
         'view_all_leave', 'approve_leave',
         'view_payslip', 'view_reports',
         'raise_support_ticket', 'view_support_tickets',
+        'view_affiliate', 'view_leads', 'create_lead', 'edit_lead',
+        'view_followups', 'create_followup',
+        'view_lead_analytics', 'view_tasks', 'view_team_tasks',
+        'create_task', 'edit_task', 'assign_task', 'view_revenue',
     ],
 
     'hr': [
@@ -72,6 +99,23 @@ ROLE_DEFAULTS = {
         'view_reports', 'export_reports',
         'raise_support_ticket', 'view_support_tickets',
         'manage_support_tickets', 'manage_support_ticket_types',
+        'view_affiliate', 'manage_affiliate',
+        'view_leads', 'create_lead', 'edit_lead', 'delete_lead',
+        'assign_lead', 'view_followups', 'create_followup',
+        'manage_lead_forms', 'view_lead_analytics',
+        'view_tasks', 'view_team_tasks', 'create_task', 'edit_task',
+        'delete_task', 'assign_task',
+        'view_revenue', 'manage_revenue',
+    ],
+
+    'counselor': [
+        'view_attendance',
+        'view_leave', 'apply_leave', 'cancel_leave',
+        'view_payslip',
+        'raise_support_ticket', 'view_support_tickets',
+        'view_leads', 'create_lead', 'edit_lead',
+        'view_followups', 'create_followup',
+        'view_tasks',
     ],
 
     'employee': [
@@ -79,6 +123,7 @@ ROLE_DEFAULTS = {
         'view_leave', 'apply_leave', 'cancel_leave',
         'view_payslip',
         'raise_support_ticket', 'view_support_tickets',
+        'view_tasks', 'view_leads', 'create_followup', 'view_followups',
     ],
 }
 
@@ -116,7 +161,7 @@ class Command(BaseCommand):
 
         # ── Step 3: Seed RolePermission with is_granted=True ─────────────
         rp_created = rp_updated = 0
-        all_roles = ['superadmin', 'admin', 'manager', 'hr', 'employee']
+        all_roles = ['superadmin', 'admin', 'manager', 'hr', 'counselor', 'employee']
 
         for role in all_roles:
             granted_codes = set(ROLE_DEFAULTS.get(role, []))

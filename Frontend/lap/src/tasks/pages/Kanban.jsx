@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useTasks } from '../context/TaskContext';
-import { MEMBERS } from '../data/mockData';
 import {
   Clock,
   CheckCircle2,
@@ -17,7 +16,7 @@ import {
 } from 'lucide-react';
 
 export default function Kanban() {
-  const { tasks, updateStatus, updateTask, navigateToDetails } = useTasks();
+  const { tasks, members, updateStatus, updateTask, navigateToDetails } = useTasks();
   
   // Quick Edit State
   const [editingTask, setEditingTask] = useState(null);
@@ -120,7 +119,7 @@ export default function Kanban() {
     e.preventDefault();
     if (!quickTitle.trim()) return;
 
-    const assignee = MEMBERS.find(m => m.id === quickAssigneeId) || editingTask.assignedTo;
+    const assignee = members.find(m => String(m.id) === String(quickAssigneeId)) || editingTask.assignedTo;
 
     const updated = {
       ...editingTask,
@@ -331,7 +330,7 @@ export default function Kanban() {
                   onChange={(e) => setQuickAssigneeId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500/25"
                 >
-                  {MEMBERS.map(member => (
+                  {members.map(member => (
                     <option key={member.id} value={member.id}>{member.name}</option>
                   ))}
                 </select>

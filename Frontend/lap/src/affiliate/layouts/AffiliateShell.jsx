@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Bell,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -40,32 +41,166 @@ const navItems = [
   { name: 'Profile', href: '/dashboard/affiliate/profile', icon: User },
 ];
 
+const navSections = [
+  {
+    name: 'Dashboard',
+    href: '/dashboard/affiliate',
+    icon: LayoutDashboard,
+  },
+  {
+    name: 'Growth',
+    icon: Users,
+    children: [
+      { name: 'Referrals', href: '/dashboard/affiliate/referrals', icon: Users },
+      { name: 'Referral Links', href: '/dashboard/affiliate/referral-links', icon: LinkIcon },
+    ],
+  },
+  {
+    name: 'Earnings',
+    icon: DollarSign,
+    children: [
+      { name: 'Earnings Overview', href: '/dashboard/affiliate/earnings', icon: DollarSign },
+      { name: 'Commission History', href: '/dashboard/affiliate/commissions', icon: FileText },
+    ],
+  },
+  {
+    name: 'Payments',
+    icon: CreditCard,
+    children: [
+      { name: 'Payment History', href: '/dashboard/affiliate/payments', icon: CreditCard },
+    ],
+  },
+  {
+    name: 'Workspace',
+    icon: Settings,
+    children: [
+      { name: 'Notifications', href: '/dashboard/affiliate/notifications', icon: Bell },
+      { name: 'Settings', href: '/dashboard/affiliate/settings', icon: Settings },
+      { name: 'Preferences', href: '/dashboard/affiliate/preferences', icon: Settings },
+      { name: 'Profile', href: '/dashboard/affiliate/profile', icon: User },
+    ],
+  },
+];
+
+const isAffiliateRouteActive = (pathname, href) => (
+  href === '/dashboard/affiliate'
+    ? pathname === href
+    : pathname.startsWith(href)
+);
+
 function AffiliateNav({ collapsed, onNavigate }) {
   const location = useLocation();
+  const [openSections, setOpenSections] = useState(() => ({
+    Growth: true,
+    Earnings: true,
+    Payments: true,
+    Workspace: true,
+  }));
+
+  useEffect(() => {
+    const next = {};
+    navSections.forEach((section) => {
+      if (section.children?.some((child) => isAffiliateRouteActive(location.pathname, child.href))) {
+        next[section.name] = true;
+      }
+    });
+    if (Object.keys(next).length > 0) {
+      setOpenSections((current) => ({ ...current, ...next }));
+    }
+  }, [location.pathname]);
+
+  const toggleSection = (name) => {
+    setOpenSections((current) => ({ ...current, [name]: !current[name] }));
+  };
 
   return (
     <nav className="flex-1 overflow-y-auto custom-scrollbar px-3 py-4 space-y-1">
-      {navItems.map((item) => {
-        const active = item.href === '/dashboard/affiliate'
-          ? location.pathname === item.href
-          : location.pathname.startsWith(item.href);
-        const Icon = item.icon;
+      {navSections.map((section) => {
+        const Icon = section.icon;
+        const sectionActive = section.href
+          ? isAffiliateRouteActive(location.pathname, section.href)
+          : section.children?.some((child) => isAffiliateRouteActive(location.pathname, child.href));
+
+        if (!section.children) {
+          return (
+            <Link
+              key={section.href}
+              to={section.href}
+              onClick={onNavigate}
+              title={collapsed ? section.name : undefined}
+              className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
+                sectionActive
+                  ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+                  : 'text-slate-300 hover:bg-white/10 hover:text-white'
+              } ${collapsed ? 'justify-center' : ''}`}
+            >
+              <Icon className="h-5 w-5 flex-shrink-0" />
+              {!collapsed && <span className="truncate">{section.name}</span>}
+            </Link>
+          );
+        }
+
+        const open = openSections[section.name] || sectionActive;
 
         return (
-          <Link
-            key={item.href}
-            to={item.href}
-            onClick={onNavigate}
-            title={collapsed ? item.name : undefined}
-            className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
-              active
-                ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
-                : 'text-slate-300 hover:bg-white/10 hover:text-white'
-            } ${collapsed ? 'justify-center' : ''}`}
-          >
-            <Icon className="h-5 w-5 flex-shrink-0" />
-            {!collapsed && <span className="truncate">{item.name}</span>}
-          </Link>
+          <div key={section.name} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => toggleSection(section.name)}
+              title={collapsed ? section.name : undefined}
+              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-all ${
+                sectionActive
+                  ? 'bg-white/10 text-white'
+                  : 'text-slate-300 hover:bg-white/10 hover:text-white'
+              } ${collapsed ? 'justify-center' : ''}`}
+              aria-expanded={open}
+            >
+              <Icon className="h-5 w-5 flex-shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate">{section.name}</span>
+                  <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </>
+              )}
+            </button>
+
+            {!collapsed && (
+              <AnimatePresence initial={false}>
+                {open && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="ml-4 space-y-1 border-l border-white/10 pl-3">
+                      {section.children.map((item) => {
+                        const active = isAffiliateRouteActive(location.pathname, item.href);
+                        const ChildIcon = item.icon;
+
+                        return (
+                          <Link
+                            key={item.href}
+                            to={item.href}
+                            onClick={onNavigate}
+                            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+                              active
+                                ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+                                : 'text-slate-400 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <ChildIcon className="h-4 w-4 flex-shrink-0" />
+                            <span className="min-w-0 truncate">{item.name}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            )}
+          </div>
         );
       })}
     </nav>
@@ -131,6 +266,7 @@ const AffiliateInner = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifs, setNotifs] = useState([]);
@@ -157,13 +293,18 @@ const AffiliateInner = ({ children }) => {
     logout?.();
     navigate('/login');
   };
+  const effectiveCollapsed = collapsed && !hoverExpanded;
 
   return (
     <div className="h-full min-h-0 bg-slate-50 text-slate-800">
       <div className="flex h-full min-h-0 overflow-hidden">
-        <aside className={`${collapsed ? 'w-[76px]' : 'w-[268px]'} hidden h-full flex-shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-white transition-all duration-200 lg:flex`}>
-          <div className={`flex h-[72px] items-center border-b border-white/10 px-4 ${collapsed ? 'justify-center' : 'justify-between'}`}>
-            {!collapsed && (
+        <aside
+          onMouseEnter={() => collapsed && setHoverExpanded(true)}
+          onMouseLeave={() => setHoverExpanded(false)}
+          className={`${effectiveCollapsed ? 'w-[76px]' : 'w-[268px]'} hidden h-full flex-shrink-0 flex-col border-r border-slate-800 bg-slate-950 text-white transition-all duration-200 lg:flex`}
+        >
+          <div className={`flex h-[72px] items-center border-b border-white/10 px-4 ${effectiveCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {!effectiveCollapsed && (
               <button onClick={() => navigate('/dashboard/affiliate')} className="flex min-w-0 items-center gap-3 text-left">
                 <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-primary-600 to-emerald-500 text-lg font-black text-white shadow-lg shadow-primary-500/25">
                   A
@@ -174,31 +315,31 @@ const AffiliateInner = ({ children }) => {
                 </span>
               </button>
             )}
-            {collapsed && (
+            {effectiveCollapsed && (
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-primary-600 to-emerald-500 text-lg font-black text-white">
                 A
               </span>
             )}
           </div>
 
-          <AffiliateNav collapsed={collapsed} />
+          <AffiliateNav collapsed={effectiveCollapsed} />
 
           <div className="border-t border-white/10 p-3">
             <button
               onClick={() => navigate('/dashboard')}
-              className={`mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white ${collapsed ? 'justify-center' : ''}`}
-              title={collapsed ? 'Back to LAP' : undefined}
+              className={`mb-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white ${effectiveCollapsed ? 'justify-center' : ''}`}
+              title={effectiveCollapsed ? 'Back to LAP' : undefined}
             >
               <ChevronLeft className="h-5 w-5" />
-              {!collapsed && 'Back to LAP'}
+              {!effectiveCollapsed && 'Back to LAP'}
             </button>
             <button
               onClick={handleLogout}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/15 hover:text-rose-100 ${collapsed ? 'justify-center' : ''}`}
-              title={collapsed ? 'Logout' : undefined}
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/15 hover:text-rose-100 ${effectiveCollapsed ? 'justify-center' : ''}`}
+              title={effectiveCollapsed ? 'Logout' : undefined}
             >
               <LogOut className="h-5 w-5" />
-              {!collapsed && 'Logout'}
+              {!effectiveCollapsed && 'Logout'}
             </button>
             <button
               onClick={() => setCollapsed((value) => !value)}

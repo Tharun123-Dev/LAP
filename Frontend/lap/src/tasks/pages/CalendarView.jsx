@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useTasks } from '../context/TaskContext';
-import { MEMBERS } from '../data/mockData';
 import {
   ChevronLeft,
   ChevronRight,
@@ -14,7 +13,7 @@ import {
 } from 'lucide-react';
 
 export default function CalendarView() {
-  const { tasks, addTask, navigateToDetails } = useTasks();
+  const { tasks, addTask, navigateToDetails, currentUser, members } = useTasks();
   
   // Calendar Navigation State
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -27,7 +26,7 @@ export default function CalendarView() {
   // New task form state (Quick Add)
   const [newTitle, setNewTitle] = useState('');
   const [newPriority, setNewPriority] = useState('medium');
-  const [newAssigneeId, setNewAssigneeId] = useState(MEMBERS[2].id); // Default to Michael Chang
+  const [newAssigneeId, setNewAssigneeId] = useState('');
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
@@ -134,7 +133,7 @@ export default function CalendarView() {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    const assignee = MEMBERS.find(m => m.id === newAssigneeId) || MEMBERS[0];
+    const assignee = members.find(m => String(m.id) === String(newAssigneeId)) || members[0];
 
     const newTask = {
       title: newTitle,
@@ -142,7 +141,7 @@ export default function CalendarView() {
       status: 'pending',
       priority: newPriority,
       assignedTo: assignee,
-      assignedBy: MEMBERS[2], // Defaults self Michael Chang
+      assignedBy: currentUser,
       startDate: selectedDate,
       dueDate: selectedDate,
       tags: ['Admissions'],
@@ -391,7 +390,7 @@ export default function CalendarView() {
                   onChange={(e) => setNewAssigneeId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500/25"
                 >
-                  {MEMBERS.map(m => (
+                  {members.map(m => (
                     <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </select>

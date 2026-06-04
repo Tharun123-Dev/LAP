@@ -2,7 +2,7 @@
 import { mockReferralLinks, mockReferrals } from '../data/dummyData';
 import affiliateApi from './affiliateApi';
 
-const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API !== 'false';
 
 const mapReferral = (ref) => ({
   id: ref.id,

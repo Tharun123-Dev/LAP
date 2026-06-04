@@ -39,6 +39,7 @@ class User(AbstractUser):
         ('admin',      'Admin'),
         ('manager',    'Manager'),
         ('hr',         'HR'),
+        ('counselor',  'Counselor'),
         ('employee',   'Employee'),
     ]
     EMP_TYPES = [

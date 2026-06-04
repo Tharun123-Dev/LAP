@@ -105,7 +105,7 @@ export const ReferralsList = () => {
               </thead>
               <tbody className="divide-y divide-slate-100/50 dark:divide-slate-800/50">
                 {filteredReferrals?.map((ref) => (
-                  <tr key={ref.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors cursor-pointer" onClick={() => navigate(`/referrals/${ref.id}`)}>
+                  <tr key={ref.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/10 transition-colors cursor-pointer" onClick={() => navigate(`/dashboard/affiliate/referrals/${ref.id}`)}>
                     <td className="py-4 pl-2 font-mono text-xs font-bold text-slate-400">
                       {ref.id}
                     </td>

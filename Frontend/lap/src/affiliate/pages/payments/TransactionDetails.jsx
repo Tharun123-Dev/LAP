@@ -19,7 +19,7 @@ export const TransactionDetails = () => {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <p className="font-bold text-rose-500">Error loading payment details: {error}</p>
-        <Link to="/payments">
+        <Link to="/dashboard/affiliate/payments">
           <Button variant="secondary" icon={ArrowLeft}>Back to Payments</Button>
         </Link>
       </div>
@@ -29,7 +29,7 @@ export const TransactionDetails = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/payments" className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+        <Link to="/dashboard/affiliate/payments" className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
           <ArrowLeft className="w-4.5 h-4.5" />
         </Link>
         <div>
@@ -82,7 +82,7 @@ export const TransactionDetails = () => {
 
           {/* Action links */}
           <div className="flex justify-center gap-3.5">
-            <Link to={`/payments/invoice/${id}`}>
+            <Link to={`/dashboard/affiliate/payments/invoice/${id}`}>
               <Button variant="primary" icon={FileText}>
                 View PDF Invoice
               </Button>

@@ -15,6 +15,10 @@ class Permission(models.Model):
         ('settings',    'Settings'),
         ('notifications','Notifications'),
         ('support_tickets', 'Support Tickets'),
+        ('affiliate', 'Affiliate'),
+        ('leads', 'Leads'),
+        ('tasks', 'Tasks'),
+        ('revenue', 'Revenue'),
     ]
 
     code        = models.CharField(max_length=100, unique=True)
@@ -36,6 +40,7 @@ class RolePermission(models.Model):
         ('admin',      'Admin'),
         ('manager',    'Manager'),
         ('hr',         'HR'),
+        ('counselor',  'Counselor'),
         ('employee',   'Employee'),
     ]
 

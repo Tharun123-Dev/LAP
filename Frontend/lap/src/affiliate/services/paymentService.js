@@ -2,7 +2,7 @@
 import { mockTransactions } from '../data/dummyData';
 import affiliateApi from './affiliateApi';
 
-const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API !== 'false';
 
 const mapPayment = (p) => ({
   id: p.id,
@@ -35,6 +35,21 @@ export const paymentService = {
     } catch {
       return mockTransactions.find((tx) => tx.id === id) || mockTransactions[0];
     }
+  },
+
+  requestPayout: async (amount) => {
+    if (!USE_API) {
+      return {
+        id: `pay_${Date.now()}`,
+        amount,
+        status: 'pending',
+        date: new Date().toISOString(),
+        method: 'Manual payout',
+        invoiceNumber: `REQ-${Date.now()}`,
+      };
+    }
+    const data = await affiliateApi.post('/affiliate/payments/', { amount });
+    return mapPayment(data);
   },
 };
 

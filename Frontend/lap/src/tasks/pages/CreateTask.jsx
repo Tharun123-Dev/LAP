@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTasks } from '../context/TaskContext';
-import { MEMBERS, TAGS, RELATED_MODULES } from '../data/mockData';
+import { TAGS, RELATED_MODULES } from '../data/mockData';
 import { 
   Paperclip, 
   Trash2, 
@@ -22,7 +22,8 @@ export default function CreateTask() {
     selectedTaskId, 
     setSelectedTaskId, 
     setActivePage,
-    currentUser 
+    currentUser,
+    members,
   } = useTasks();
 
   const isEditMode = !!selectedTaskId;
@@ -39,7 +40,7 @@ export default function CreateTask() {
     d.setDate(d.getDate() + 3);
     return d.toISOString().split('T')[0];
   });
-  const [assignedToId, setAssignedToId] = useState(MEMBERS[0].id);
+  const [assignedToId, setAssignedToId] = useState('');
   const [assignedById, setAssignedById] = useState(currentUser.id);
   const [selectedTags, setSelectedTags] = useState([]);
   const [relatedModule, setRelatedModule] = useState(RELATED_MODULES[0]);
@@ -57,7 +58,7 @@ export default function CreateTask() {
       setPriority(editingTask.priority);
       setStartDate(editingTask.startDate || new Date().toISOString().split('T')[0]);
       setDueDate(editingTask.dueDate);
-      setAssignedToId(editingTask.assignedTo?.id || MEMBERS[0].id);
+      setAssignedToId(editingTask.assignedTo?.id || members[0]?.id || '');
       setAssignedById(editingTask.assignedBy?.id || currentUser.id);
       setSelectedTags(editingTask.tags || []);
       setRelatedModule(editingTask.relatedModule || RELATED_MODULES[0]);
@@ -72,13 +73,13 @@ export default function CreateTask() {
       const d = new Date();
       d.setDate(d.getDate() + 3);
       setDueDate(d.toISOString().split('T')[0]);
-      setAssignedToId(MEMBERS[0].id);
+      setAssignedToId(members[0]?.id || '');
       setAssignedById(currentUser.id);
       setSelectedTags([]);
       setRelatedModule(RELATED_MODULES[0]);
       setAttachments([]);
     }
-  }, [isEditMode, editingTask, currentUser]);
+  }, [isEditMode, editingTask, currentUser, members]);
 
   const handleTagToggle = (tag) => {
     setSelectedTags(prev => 
@@ -119,8 +120,8 @@ export default function CreateTask() {
     if (e) e.preventDefault();
     if (!title.trim()) return;
 
-    const assignee = MEMBERS.find(m => m.id === assignedToId) || MEMBERS[0];
-    const assigner = MEMBERS.find(m => m.id === assignedById) || currentUser;
+    const assignee = members.find(m => String(m.id) === String(assignedToId)) || members[0];
+    const assigner = members.find(m => String(m.id) === String(assignedById)) || currentUser;
 
     const taskPayload = {
       title,
@@ -245,7 +246,7 @@ export default function CreateTask() {
                   onChange={(e) => setAssignedToId(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500/25"
                 >
-                  {MEMBERS.map(member => (
+                  {members.map(member => (
                     <option key={member.id} value={member.id}>
                       {member.name} ({member.role})
                     </option>
@@ -260,7 +261,7 @@ export default function CreateTask() {
                   onChange={(e) => setAssignedById(e.target.value)}
                   className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-500/25"
                 >
-                  {MEMBERS.map(member => (
+                  {members.map(member => (
                     <option key={member.id} value={member.id}>
                       {member.name} ({member.role})
                     </option>

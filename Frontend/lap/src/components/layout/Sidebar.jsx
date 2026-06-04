@@ -4,6 +4,7 @@ import {
   Bell,
   Building2,
   CalendarCheck,
+  ChevronDown,
   FileBarChart,
   Gauge,
   Handshake,
@@ -25,6 +26,7 @@ const iconFallback = (label) => label?.charAt(0)?.toUpperCase() || '?'
 const iconByLabel = {
   Dashboard: Gauge,
   'Affiliate Dashboard': Handshake,
+  Leads: Users,
   Employees: Users,
   Departments: Building2,
   Attendance: CalendarCheck,
@@ -38,6 +40,7 @@ const iconByLabel = {
   Settings: Settings,
   'System Settings': SlidersHorizontal,
   Tasks: ListTodo,
+  Revenue: WalletCards,
 }
 
 function NavIcon({ item }) {
@@ -70,21 +73,42 @@ export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [auth, setAuth] = useState(() => store.getState().auth || {})
+  const [expandedMenu, setExpandedMenu] = useState('')
 
   useEffect(() => {
     return store.subscribe(() => setAuth(store.getState().auth || {}))
   }, [])
 
   const role = auth.role || 'employee'
+  const roleKey = String(role || '').toLowerCase()
   const user = auth.user
 
-  const items = role === 'superadmin' || role === 'admin'
+  const permissions = auth.permissions || []
+  const canSee = (item) => {
+    if (roleKey === 'superadmin' || roleKey === 'admin') return true
+    if (item.always) return true
+    if (!item.codes || item.codes.length === 0) return true
+    return item.codes.some((code) => permissions.includes(code))
+  }
+
+  const sourceItems = roleKey === 'superadmin' || roleKey === 'admin'
     ? SUPERADMIN_NAV
     : NAV_ITEMS
+
+  const items = sourceItems
+    .filter(canSee)
+    .map((item) => ({
+      ...item,
+      children: item.children?.filter(canSee),
+    }))
 
   const go = (path) => {
     navigate(path)
     onClose?.()
+  }
+
+  const toggleMenu = (path) => {
+    setExpandedMenu((current) => (current === path ? '' : path))
   }
 
   const handleLogout = () => {
@@ -118,20 +142,83 @@ export default function Sidebar({ open, onClose }) {
           const active = item.path === '/dashboard'
             ? location.pathname === '/dashboard'
             : location.pathname.startsWith(item.path)
+          const hasChildren = Array.isArray(item.children) && item.children.length > 0
+          const submenuOpen = expandedMenu === item.path || active
 
           return (
-            <button
-              key={item.path}
-              onClick={() => go(item.path)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-all ${
-                active
-                  ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
-                  : 'text-slate-300 hover:bg-white/10 hover:text-white'
-              }`}
-            >
-              <NavIcon item={item} />
-              <span className="min-w-0 truncate">{item.label}</span>
-            </button>
+            <div key={item.path} className="group relative">
+              <button
+                onClick={() => (hasChildren ? toggleMenu(item.path) : go(item.path))}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold transition-all ${
+                  active
+                    ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20'
+                    : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                }`}
+                aria-expanded={hasChildren ? submenuOpen : undefined}
+              >
+                <NavIcon item={item} />
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                {hasChildren && (
+                  <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform ${submenuOpen ? 'rotate-180' : ''}`} />
+                )}
+              </button>
+
+              {hasChildren && (
+                <>
+                  <div className={`${submenuOpen ? 'block' : 'hidden'} mt-1 space-y-1 rounded-xl bg-white/5 p-2`}>
+                    {item.children.map((child) => {
+                      const childActive = child.path === item.path
+                        ? location.pathname === child.path
+                        : location.pathname.startsWith(child.path)
+
+                      return (
+                        <button
+                          key={child.path}
+                          onClick={() => go(child.path)}
+                          className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-xs font-bold transition ${
+                            childActive
+                              ? 'bg-white text-slate-950'
+                              : 'text-slate-400 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <span className="min-w-0 truncate">{child.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  <div className="pointer-events-none fixed left-[268px] z-50 hidden w-72 pl-3 opacity-0 transition xl:group-hover:pointer-events-auto xl:group-hover:opacity-100 xl:group-focus-within:pointer-events-auto xl:group-focus-within:opacity-100">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-2 shadow-2xl shadow-slate-950/30">
+                      <div className="px-3 py-2">
+                        <p className="text-xs font-black uppercase tracking-wide text-primary-300">{item.label}</p>
+                        <p className="mt-1 text-[11px] font-semibold text-slate-500">Open any section</p>
+                      </div>
+                      <div className="space-y-1">
+                        {item.children.map((child) => {
+                          const childActive = child.path === item.path
+                            ? location.pathname === child.path
+                            : location.pathname.startsWith(child.path)
+
+                          return (
+                            <button
+                              key={child.path}
+                              onClick={() => go(child.path)}
+                              className={`flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
+                                childActive
+                                  ? 'bg-primary-600 text-white'
+                                  : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                              }`}
+                            >
+                              <span className="min-w-0 truncate">{child.label}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )
         })}
       </nav>

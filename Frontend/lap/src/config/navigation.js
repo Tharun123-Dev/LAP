@@ -21,9 +21,40 @@
 // The Sidebar auto-detects image paths (strings starting with "/") and renders
 // them as <img> tags with CSS filter tinting. Emojis still work as fallback.
 
+export const AFFILIATE_NAV_ITEMS = [
+  { label: 'Referrals', path: '/dashboard/affiliate/referrals' },
+  { label: 'Referral Links', path: '/dashboard/affiliate/referral-links' },
+  { label: 'Earnings', path: '/dashboard/affiliate/earnings' },
+  { label: 'Commission History', path: '/dashboard/affiliate/commissions' },
+  { label: 'Payments', path: '/dashboard/affiliate/payments' },
+  { label: 'Notifications', path: '/dashboard/affiliate/notifications' },
+  { label: 'Settings', path: '/dashboard/affiliate/settings' },
+  { label: 'Preferences', path: '/dashboard/affiliate/preferences' },
+  { label: 'Profile', path: '/dashboard/affiliate/profile' },
+]
+
+export const LEADS_NAV_ITEMS = [
+  { label: 'All Leads', path: '/dashboard/leads', codes: ['view_leads'] },
+  { label: 'Student Form', path: '/dashboard/leads/student-form', codes: ['create_lead'] },
+  { label: 'Add Lead', path: '/dashboard/leads/add', codes: ['create_lead'] },
+  { label: 'Follow Ups', path: '/dashboard/leads/follow-ups', codes: ['view_followups', 'create_followup'] },
+  { label: 'Analytics', path: '/dashboard/leads/analytics', codes: ['view_lead_analytics'] },
+  { label: 'Form Builder', path: '/dashboard/leads/form-builder', codes: ['manage_lead_forms'] },
+]
+
+export const TASK_NAV_ITEMS = [
+  { label: 'Dashboard', path: '/dashboard/tasks', codes: ['view_tasks', 'view_team_tasks'] },
+  { label: 'Create Task', path: '/dashboard/tasks', codes: ['create_task'] },
+  { label: 'My Tasks', path: '/dashboard/tasks', codes: ['view_tasks'] },
+]
+
+export const REVENUE_NAV_ITEMS = [
+  { label: 'Overview', path: '/dashboard/revenue', codes: ['view_revenue'] },
+]
+
 export const NAV_ITEMS = [
   { label: 'Dashboard',       path: '/dashboard',                 icon: '/icons/dashboard.png',       always: true },
-  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate', icon: '/icons/affiliate.png', always: true },
+  { label: 'Affiliate Dashboard',path: '/dashboard/affiliate', icon: '/icons/affiliate.png', codes: ['view_affiliate', 'manage_affiliate'], children: AFFILIATE_NAV_ITEMS },
   { label: 'Employees',       path: '/dashboard/employees',       icon: '/icons/employees.png',       codes: ['view_employees', 'create_employee'] },
   { label: 'Departments',     path: '/dashboard/departments',     icon: '/icons/departments.png',     codes: ['view_departments', 'create_department'] },
   { label: 'Attendance',      path: '/dashboard/attendance',      icon: '/icons/attendance.png',      codes: ['view_attendance', 'view_team_attendance'] },
@@ -36,7 +67,9 @@ export const NAV_ITEMS = [
   { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png',   always: true },
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png',        always: true },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png', codes: ['manage_settings'] },
-  { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks', always: true },
+  { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks', codes: ['view_tasks', 'view_team_tasks', 'create_task', 'assign_task'], children: TASK_NAV_ITEMS },
+  { label: 'Leads', path: '/dashboard/leads', icon: '/icons/leads.png', codes: ['view_leads', 'create_lead', 'view_followups', 'create_followup', 'view_lead_analytics', 'manage_lead_forms'], children: LEADS_NAV_ITEMS },
+  { label: 'Revenue', path: '/dashboard/revenue', icon: 'revenue', codes: ['view_revenue', 'manage_revenue'], children: REVENUE_NAV_ITEMS },
 ]
 
 // Superadmin sees everything always (bypasses permission check)
@@ -54,8 +87,11 @@ export const SUPERADMIN_NAV = [
   { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png'    },
   { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png'         },
   { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png'  },
-  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate',       icon: '/icons/affiliate.png'         },
+  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate',       icon: '/icons/affiliate.png', children: AFFILIATE_NAV_ITEMS },
   { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks' },
+  { label: 'Leads', path: '/dashboard/leads', icon: '/icons/leads.png', children: LEADS_NAV_ITEMS },
+  { label: 'Revenue', path: '/dashboard/revenue', icon: 'revenue', children: REVENUE_NAV_ITEMS },
+
 ]
 
 export default { superadmin: SUPERADMIN_NAV, admin: SUPERADMIN_NAV }

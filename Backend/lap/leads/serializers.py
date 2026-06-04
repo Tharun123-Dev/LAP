@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Lead, LeadForm, LeadField, LeadFieldValue, FollowUp, LeadNotification
+from .models import Lead, LeadForm, LeadField, LeadFieldValue, FollowUp, LeadNotification, LeadOption
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -8,9 +8,14 @@ User = get_user_model()
 # ─── User (minimal) ───────────────────────────────────────────────────────────
 
 class CounselorSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ['id', 'full_name', 'email']
+        fields = ['id', 'full_name', 'email', 'role']
+
+    def get_full_name(self, obj):
+        return obj.get_full_name() or obj.username
 
 
 # ─── LeadField ────────────────────────────────────────────────────────────────
@@ -50,6 +55,25 @@ class LeadFormCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = LeadForm
         fields = ['name', 'description', 'is_active']
+
+
+class LeadOptionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeadOption
+        fields = [
+            'id', 'tenant_id', 'category', 'label', 'value',
+            'color', 'sort_order', 'is_active', 'is_system'
+        ]
+        read_only_fields = ['id', 'tenant_id', 'is_system']
+
+
+class LeadOptionCreateUpdateSerializer(serializers.Serializer):
+    category = serializers.ChoiceField(choices=['status', 'contact_method'])
+    label = serializers.CharField(max_length=100)
+    value = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    color = serializers.CharField(max_length=30, required=False, allow_blank=True)
+    sort_order = serializers.IntegerField(required=False, default=0)
+    is_active = serializers.BooleanField(required=False, default=True)
 
 
 # ─── FieldSync ────────────────────────────────────────────────────────────────
@@ -99,6 +123,7 @@ class LeadSerializer(serializers.ModelSerializer):
         model = Lead
         fields = [
             'id', 'full_name', 'email', 'phone', 'status',
+            'revenue_amount', 'payment_status', 'payment_reference',
             'counselor', 'counselor_id', 'form_id', 'tenant_id',
             'created_at', 'updated_at', 'field_values'
         ]
@@ -109,11 +134,11 @@ class LeadCreateSerializer(serializers.Serializer):
     full_name = serializers.CharField()
     email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    status = serializers.ChoiceField(
-        choices=[s[0] for s in Lead._meta.get_field('status').choices],
-        default='New'
-    )
+    status = serializers.CharField(required=False, default='New')
     counselor_id = serializers.IntegerField(required=False, allow_null=True)
+    revenue_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    payment_status = serializers.CharField(required=False, allow_blank=True)
+    payment_reference = serializers.CharField(required=False, allow_blank=True)
     form_id = serializers.IntegerField()
     dynamic_fields = LeadFieldValueCreateSerializer(many=True, required=False, default=[])
 
@@ -122,11 +147,11 @@ class LeadUpdateSerializer(serializers.Serializer):
     full_name = serializers.CharField(required=False)
     email = serializers.EmailField(required=False, allow_blank=True, allow_null=True)
     phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
-    status = serializers.ChoiceField(
-        choices=[s[0] for s in Lead._meta.get_field('status').choices],
-        required=False
-    )
+    status = serializers.CharField(required=False)
     counselor_id = serializers.IntegerField(required=False, allow_null=True)
+    revenue_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    payment_status = serializers.CharField(required=False, allow_blank=True)
+    payment_reference = serializers.CharField(required=False, allow_blank=True)
     dynamic_fields = LeadFieldValueCreateSerializer(many=True, required=False)
 
 
@@ -145,7 +170,7 @@ class FollowUpSerializer(serializers.ModelSerializer):
 class FollowUpCreateSerializer(serializers.Serializer):
     lead_id = serializers.IntegerField()
     note = serializers.CharField()
-    scheduled_at = serializers.DateTimeField()
+    scheduled_at = serializers.DateTimeField(required=False, allow_null=True)
     completed = serializers.BooleanField(default=False)
 
 

@@ -2,7 +2,7 @@
 import { mockUser } from '../data/dummyData';
 import affiliateApi from './affiliateApi';
 
-const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API !== 'false';
 
 const getCurrentLapProfile = () => {
   const userId = localStorage.getItem('user_id') || 'lap-user';
@@ -90,7 +90,8 @@ export const authService = {
     try {
       const data = await affiliateApi.get('/affiliate/profile/');
       return mapProfile(data);
-    } catch {
+    } catch (error) {
+      if (USE_API) throw error;
       const currentUser = getCurrentLapProfile();
       localStorage.setItem('affiliate_ref_code', currentUser.referralCode);
       return mapProfile(currentUser);
@@ -126,7 +127,8 @@ export const authService = {
     try {
       const data = await affiliateApi.put('/affiliate/profile/', payload);
       return mapProfile(data);
-    } catch {
+    } catch (error) {
+      if (USE_API) throw error;
       const currentUser = getCurrentLapProfile();
       return mapProfile({
         ...currentUser,

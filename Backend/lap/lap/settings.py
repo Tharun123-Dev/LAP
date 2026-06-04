@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'support_tickets',
     'affiliate',
     'leads',
+    'tasks',
     
 ]
 
@@ -148,3 +149,10 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
+
+# Affiliate module configuration.
+# Manual mode records payout requests/process status in LAP.
+# Add gateway credentials later only if you want real payment disbursement API integration.
+AFFILIATE_COMMISSION_RATE = float(os.getenv('AFFILIATE_COMMISSION_RATE', '0.10'))
+AFFILIATE_MIN_PAYOUT_AMOUNT = float(os.getenv('AFFILIATE_MIN_PAYOUT_AMOUNT', '500'))
+AFFILIATE_PAYMENT_MODE = os.getenv('AFFILIATE_PAYMENT_MODE', 'manual')

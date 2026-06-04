@@ -2,7 +2,7 @@
 import { monthlyPerformance } from '../data/chartData';
 import affiliateApi from './affiliateApi';
 
-const USE_API = import.meta.env.VITE_USE_AFFILIATE_API === 'true';
+const USE_API = import.meta.env.VITE_USE_AFFILIATE_API !== 'false';
 
 export const analyticsService = {
   getPerformanceTrends: async () => {

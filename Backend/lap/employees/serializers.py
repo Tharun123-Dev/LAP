@@ -53,7 +53,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
     first_name    = serializers.CharField()
     last_name     = serializers.CharField()
     password      = serializers.CharField(write_only=True)
-    role          = serializers.ChoiceField(choices=['manager', 'hr', 'employee'])
+    role          = serializers.ChoiceField(choices=['manager', 'hr', 'counselor', 'employee'])
     employee_type = serializers.ChoiceField(choices=['regular', 'contract', 'parttime', 'intern'])
     custom_role   = serializers.IntegerField(required=False, allow_null=True)  # CustomRole id
 

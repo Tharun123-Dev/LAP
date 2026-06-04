@@ -12,6 +12,7 @@ const DESIGNATIONS = [
 
 const BASE_ROLES = [
   { value: 'employee', label: 'Employee' },
+  { value: 'counselor', label: 'Counselor' },
   { value: 'hr',       label: 'HR' },
   { value: 'manager',  label: 'Manager' },
 ]
