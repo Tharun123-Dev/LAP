@@ -21,6 +21,8 @@ export const LeadAppProvider = ({ children }) => {
   // Adjust the selector path if your Redux slice key differs.
   // Common patterns: state.auth.user  |  state.auth.employee  |  state.user.data
   const lapUser = useSelector((state) => state.auth?.user || state.auth?.employee || null);
+  const permissions = useSelector((state) => state.auth?.permissions || []);
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
 
   // ── Normalise user shape to what lead module pages expect ──────────────
   const user = lapUser
@@ -30,14 +32,7 @@ export const LeadAppProvider = ({ children }) => {
           ? `${lapUser.first_name || ''} ${lapUser.last_name || ''}`.trim()
           : lapUser.username || lapUser.email?.split('@')[0] || 'User',
         email: lapUser.email || '',
-        // Treat superadmin, admin, hr, manager as 'admin' in lead module
-        role:
-          lapUser.is_superuser ||
-          ['admin', 'hr', 'manager', 'superadmin'].includes(
-            String(lapUser.role || lapUser.user_type || '').toLowerCase()
-          )
-            ? 'admin'
-            : 'counselor',
+        role: hasAny('assign_lead', 'view_lead_analytics', 'manage_lead_forms') ? 'admin' : 'counselor',
       }
     : null;
 

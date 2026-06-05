@@ -139,7 +139,7 @@ class LeadCreateSerializer(serializers.Serializer):
     revenue_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     payment_status = serializers.CharField(required=False, allow_blank=True)
     payment_reference = serializers.CharField(required=False, allow_blank=True)
-    form_id = serializers.IntegerField()
+    form_id = serializers.IntegerField(required=False, allow_null=True)
     dynamic_fields = LeadFieldValueCreateSerializer(many=True, required=False, default=[])
 
 
@@ -152,6 +152,7 @@ class LeadUpdateSerializer(serializers.Serializer):
     revenue_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     payment_status = serializers.CharField(required=False, allow_blank=True)
     payment_reference = serializers.CharField(required=False, allow_blank=True)
+    form_id = serializers.IntegerField(required=False, allow_null=True)
     dynamic_fields = LeadFieldValueCreateSerializer(many=True, required=False)
 
 

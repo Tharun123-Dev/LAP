@@ -26,11 +26,8 @@ export default function LeadDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { leads, followups, formFields, counselors, forms, leadOptions, loading, addFollowup, updateLead, assignLead } = useApp();
-  const { permissions = [], role } = useSelector((state) => state.auth || {});
-  const normalizedRole = String(role || '').toLowerCase();
-  const hasAny = (...codes) => (
-    normalizedRole === 'superadmin' || normalizedRole === 'admin' || codes.some((code) => permissions.includes(code))
-  );
+  const { permissions = [] } = useSelector((state) => state.auth || {});
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
   const canEdit = hasAny('edit_lead');
   const canFollowUp = hasAny('create_followup');
   const canAssign = hasAny('assign_lead');

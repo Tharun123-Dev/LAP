@@ -901,14 +901,23 @@ class DashboardStatsView(APIView):
         from employees.models import EmployeeProfile
 
         today = date.today()
-        role  = request.user.role
-
-        if role in ('admin', 'superadmin', 'hr'):
+        if any(request.user.has_perm_code(code) for code in (
+            'view_employees',
+            'view_reports',
+            'view_payroll',
+            'process_payroll',
+            'view_all_leave',
+            'manage_settings',
+        )):
             return self._admin_stats(request, today)
-        elif role == 'manager':
+        elif any(request.user.has_perm_code(code) for code in (
+            'view_team_attendance',
+            'approve_leave',
+            'view_team_tasks',
+        )):
             return self._manager_stats(request, today)
-        else:
-            return self._employee_stats(request, today)
+
+        return self._employee_stats(request, today)
 
     def _employee_stats(self, request, today):
         from attendance.models import AttendanceRecord
@@ -939,7 +948,7 @@ class DashboardStatsView(APIView):
         ).first()
 
         return Response({
-            'role': 'employee',
+            'scope': 'personal',
             'attendance': {
                 'present_this_month': present,
                 'absent_this_month':  absent,
@@ -1002,7 +1011,7 @@ class DashboardStatsView(APIView):
             }
 
         return Response({
-            'role': 'admin',
+            'scope': 'company',
             'headcount': {
                 'total_employees':   total_emp,
                 'total_departments': total_dept,
@@ -1023,7 +1032,7 @@ class DashboardStatsView(APIView):
         pending    = LeaveRequest.objects.filter(employee_id__in=team_ids, status='pending').count()
 
         return Response({
-            'role': 'manager',
+            'scope': 'team',
             'team': {
                 'total':            len(team_ids),
                 'checked_in_today': checked_in,

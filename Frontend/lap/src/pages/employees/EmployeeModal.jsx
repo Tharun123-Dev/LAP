@@ -27,7 +27,6 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
 
   const dispatch      = useDispatch()
   const currentUserId = useSelector(s => s.auth.userId)
-  const currentRole   = useSelector(s => s.auth.role)
 
   const [managers,      setManagers]      = useState([])
   const [customRoles,   setCustomRoles]   = useState([])
@@ -49,9 +48,7 @@ export default function EmployeeModal({ employee, departments, onClose, onSaved 
     phone: '', address: '', manager: '', date_of_birth: '',
   })
 
-  const allRoles = currentRole === 'superadmin'
-    ? [...BASE_ROLES, ...SUPERADMIN_ONLY_ROLES]
-    : BASE_ROLES
+  const allRoles = [...BASE_ROLES, ...SUPERADMIN_ONLY_ROLES]
 
   const availableRoles = allRoles.some(r => r.value === (isEdit ? employee?.role : form.role))
     ? allRoles

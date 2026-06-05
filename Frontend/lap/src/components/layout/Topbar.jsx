@@ -1,7 +1,7 @@
 import { Menu } from 'lucide-react'
 import { useSelector } from 'react-redux'
 import { useLocation } from 'react-router-dom'
-import { NAV_ITEMS, SUPERADMIN_NAV } from '../../config/navigation'
+import { NAV_ITEMS } from '../../config/navigation'
 
 export default function Topbar({ onMenuClick }) {
   const location = useLocation()
@@ -9,9 +9,7 @@ export default function Topbar({ onMenuClick }) {
   const permissions = useSelector((s) => s.auth.permissions) || []
   const user = useSelector((s) => s.auth.user)
 
-  const items = role === 'superadmin' || role === 'admin'
-    ? SUPERADMIN_NAV
-    : NAV_ITEMS.filter((item) => item.always || item.codes?.some((code) => permissions.includes(code)))
+  const items = NAV_ITEMS.filter((item) => item.always || item.codes?.some((code) => permissions.includes(code)))
 
   const title = items.find((item) => (
     item.path === '/dashboard'

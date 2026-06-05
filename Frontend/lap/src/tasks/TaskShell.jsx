@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 function TaskAppContent() {
-  const { permissions = [], role } = useSelector((state) => state.auth || {});
+  const { permissions = [] } = useSelector((state) => state.auth || {});
   const {
     darkMode, toggleDarkMode, activePage, setActivePage,
     currentUser, setCurrentUser, members, notifications,
@@ -25,9 +25,7 @@ function TaskAppContent() {
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [showDemoTools, setShowDemoTools] = useState(false);
 
-  const hasAny = (...codes) => (
-    ['superadmin', 'admin'].includes(String(role || '').toLowerCase()) || codes.some((code) => permissions.includes(code))
-  );
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
 
   const unreadCount = notifications.filter(n => !n.read).length;
   const navItems = useMemo(() => ([
@@ -38,7 +36,7 @@ function TaskAppContent() {
     hasAny('view_tasks', 'view_team_tasks', 'assign_task') && { id: 'my-tasks', label: 'My Tasks' },
     hasAny('create_task', 'assign_task') && { id: 'create-task', label: 'Create Task' },
     hasAny('view_tasks', 'view_team_tasks', 'assign_task') && { id: 'notifications', label: 'Notifications', badge: unreadCount },
-  ]).filter(Boolean), [permissions, role, unreadCount]);
+  ]).filter(Boolean), [permissions, unreadCount]);
 
   useEffect(() => {
     if (!navItems.some((item) => item.id === activePage)) {

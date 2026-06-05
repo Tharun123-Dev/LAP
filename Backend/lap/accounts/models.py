@@ -66,6 +66,10 @@ class User(AbstractUser):
         return f"{self.username} ({label})"
 
     def get_effective_role(self):
+        if self.is_superuser:
+            return 'superadmin'
+        if self.custom_role and self.custom_role.is_active and self.custom_role.base_role:
+            return self.custom_role.base_role
         return self.role
 
     def get_display_role(self):
@@ -75,28 +79,27 @@ class User(AbstractUser):
 
     def get_permissions_list(self):
         """
-        Superadmin/Admin: all permissions granted.
-        Others: ONLY their explicitly granted UserPermissionOverride entries.
-        This means admin must explicitly grant permissions to each employee.
+        Django superuser: all permissions granted.
+        Normal users: only explicitly granted user permissions.
         """
         from utils.models import Permission, UserPermissionOverride
 
-        # Superadmin and Admin always get all permissions
-        if self.role in ('superadmin', 'admin'):
+        if self.is_superuser:
             return list(Permission.objects.values_list('code', flat=True))
 
-        # All other users: ONLY explicitly granted overrides
-        granted = UserPermissionOverride.objects.filter(
-            user=self, is_granted=True
-        ).values_list('permission__code', flat=True)
-        return list(granted)
+        return list(UserPermissionOverride.objects.filter(
+            user=self,
+            is_granted=True,
+        ).values_list('permission__code', flat=True))
 
     def has_perm_code(self, code):
-        from utils.models import Permission, UserPermissionOverride
+        from utils.models import UserPermissionOverride
 
-        if self.role in ('superadmin', 'admin'):
+        if self.is_superuser:
             return True
 
         return UserPermissionOverride.objects.filter(
-            user=self, permission__code=code, is_granted=True
+            user=self,
+            permission__code=code,
+            is_granted=True,
         ).exists()

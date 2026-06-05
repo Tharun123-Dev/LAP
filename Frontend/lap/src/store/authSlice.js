@@ -52,6 +52,21 @@ const authSlice = createSlice({
       state.permissions = payload  // payload = string[] of permission codes
     },
 
+    syncAuthUser: (state, { payload }) => {
+      const name = [payload.first_name, payload.last_name].filter(Boolean).join(' ') || payload.username
+
+      state.user         = name || state.user
+      state.role         = payload.role || state.role
+      state.userId       = payload.id || state.userId
+      state.employeeType = payload.employee_type || state.employeeType
+      state.permissions  = payload.permissions || []
+
+      if (state.role) localStorage.setItem('role', state.role)
+      if (state.user) localStorage.setItem('name', state.user)
+      if (state.userId) localStorage.setItem('user_id', state.userId)
+      if (state.employeeType) localStorage.setItem('employee_type', state.employeeType)
+    },
+
     logout: (state) => {
       state.user = state.role = state.access = state.refresh = state.employeeType = state.userId = null
       state.permissions = []
@@ -60,5 +75,5 @@ const authSlice = createSlice({
   },
 })
 
-export const { setCredentials, updatePermissions, logout } = authSlice.actions
+export const { setCredentials, updatePermissions, syncAuthUser, logout } = authSlice.actions
 export default authSlice.reducer

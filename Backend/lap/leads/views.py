@@ -14,7 +14,6 @@ from .serializers import (
     LeadOptionSerializer,
 )
 from . import services
-from .permissions import IsAdminUser, IsAdminOrCounselor
 from accounts.models import User
 from notifications.utils import notify_permission, notify_user
 
@@ -22,12 +21,7 @@ from notifications.utils import notify_permission, notify_user
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
 def _is_admin(user):
-    if user.is_superuser:
-        return True
-    role = getattr(user, 'role', None)
-    if role is None:
-        return False
-    return str(role).lower() in ('admin', 'hr', 'manager')
+    return _has_any_perm(user, 'assign_lead', 'view_lead_analytics', 'manage_lead_forms')
 
 
 def _has_perm(user, code):
@@ -391,7 +385,7 @@ class LeadAssignCounselorView(APIView):
     def post(self, request, lead_id, counselor_id):
         if not _has_perm(request.user, 'assign_lead'):
             return _denied()
-        counselor = User.objects.filter(id=counselor_id, is_active=True, role='counselor').first()
+        counselor = User.objects.filter(id=counselor_id, is_active=True).first()
         if not counselor:
             return Response({'detail': 'Counselor not found'}, status=404)
         lead = services.get_lead(lead_id)
@@ -527,7 +521,10 @@ class LeadUsersListView(APIView):
     def get(self, request):
         if not _has_any_perm(request.user, 'view_leads', 'create_lead', 'assign_lead', 'create_followup'):
             return _denied()
-        users = User.objects.filter(is_active=True, role='counselor')
+        users = User.objects.filter(is_active=True)
+        tenant_id = getattr(request.user, 'tenant_id', None)
+        if tenant_id:
+            users = users.filter(tenant_id=tenant_id)
         return Response([
             {
                 'id': user.id,

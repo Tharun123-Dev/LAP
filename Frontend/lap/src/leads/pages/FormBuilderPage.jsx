@@ -37,6 +37,14 @@ export default function FormBuilderPage() {
   }, [forms, selectedFormId]);
 
   React.useEffect(() => {
+    if (!forms?.length || selectedFormId === null) return;
+    if (!forms.some((form) => form.id === selectedFormId)) {
+      const activeForm = forms.find(f => f.name === "Active Intake Form");
+      setSelectedFormId(activeForm ? activeForm.id : forms[0].id);
+    }
+  }, [forms, selectedFormId]);
+
+  React.useEffect(() => {
     if (selectedFormId !== null && forms) {
       const form = forms.find(f => f.id === selectedFormId);
       if (form && form.fields) setFields([...form.fields]);
@@ -106,6 +114,7 @@ export default function FormBuilderPage() {
   };
 
   const handleSaveLayout = () => {
+    if (!selectedFormId) return;
     saveFormTemplate(selectedFormId, fields);
   };
 
@@ -169,6 +178,7 @@ export default function FormBuilderPage() {
 
           <button
             onClick={handleSaveLayout}
+            disabled={!selectedFormId}
             className="px-4 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-xl shadow-md shadow-indigo-500/10 flex items-center justify-center gap-1.5 hover-scale"
           >
             <Save className="w-4 h-4" /> Save Schema

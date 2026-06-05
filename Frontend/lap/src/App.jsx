@@ -18,6 +18,7 @@ import ProfileSettings from './pages/settings/ProfileSettings'
 import SystemSettings from './pages/settings/SystemSettings'
 import RevenuePage from './pages/revenue/RevenuePage'
 import ProtectedRoute from './components/ProtectedRoute'
+import AuthSync from './components/AuthSync'
 import { AFFILIATE_NAV_ITEMS } from './config/navigation'
 
 import AffiliateDashboard from './affiliate/pages/dashboard/DashboardHome'
@@ -94,6 +95,7 @@ const withAffiliateAccess = (children) => (
 export default function App() {
   return (
     <>
+      <AuthSync />
       <Toaster position="top-right" />
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
@@ -117,7 +119,7 @@ export default function App() {
           <Route path="self-reports" element={<ProtectedRoute requiredPermission="self_reports"><ReportsPage forcedScope="self" /></ProtectedRoute>} />
           <Route path="notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
           <Route path="settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
-          <Route path="settings/system" element={<ProtectedRoute><SystemSettings /></ProtectedRoute>} />
+          <Route path="settings/system" element={<ProtectedRoute requiredPermission="manage_settings"><SystemSettings /></ProtectedRoute>} />
           <Route path="permissions" element={<ProtectedRoute requiredPermission="manage_permissions"><PermissionManager /></ProtectedRoute>} />
           <Route path="tasks" element={<ProtectedRoute requiredAny={tasksGuard}><TaskShell /></ProtectedRoute>} />
           <Route path="leads/*" element={<ProtectedRoute requiredAny={leadsGuard}><LeadShell /></ProtectedRoute>} />

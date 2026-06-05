@@ -9,11 +9,9 @@ from rest_framework.permissions import BasePermission
 
 class IsAdminOrHR(BasePermission):
     def has_permission(self, request, view):
-        return (
-            request.user and
-            request.user.is_authenticated and
-            request.user.role in ('superadmin', 'admin', 'hr')
-        )
+        if not request.user or not request.user.is_authenticated:
+            return False
+        return request.user.has_perm_code('manage_settings')
 from .models import Notification, SystemSetting
 from .serializers import NotificationSerializer, SystemSettingSerializer
 from accounts.tenant_utils import get_tenant_id

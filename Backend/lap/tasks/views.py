@@ -29,7 +29,7 @@ class TaskViewSet(viewsets.ModelViewSet):
             'comments__author', 'history__user'
         ).filter(tenant_id=tenant_id)
 
-        if user.role in ('superadmin', 'admin') or user.has_perm_code('view_team_tasks') or user.has_perm_code('assign_task'):
+        if user.has_perm_code('view_team_tasks') or user.has_perm_code('assign_task'):
             return qs
 
         return qs.filter(Q(assigned_to=user) | Q(assigned_by=user))

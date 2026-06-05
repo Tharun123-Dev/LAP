@@ -14,11 +14,9 @@ import Toast from './components/Common/Toast';
 
 function LeadModuleInner() {
   const { toast } = useLeadApp();
-  const { permissions = [], role } = useSelector((state) => state.auth || {});
+  const { permissions = [] } = useSelector((state) => state.auth || {});
 
-  const hasAny = (...codes) => (
-    ['superadmin', 'admin'].includes(String(role || '').toLowerCase()) || codes.some((code) => permissions.includes(code))
-  );
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
 
   const navItems = [
     hasAny('view_leads') && { path: '/dashboard/leads', label: 'All Leads', end: true },

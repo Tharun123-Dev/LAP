@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
 import { exportToCSV, mapLeadToCSVRow } from '../utils/exportCSV';
 import StatusBadge from '../components/Common/StatusBadge';
 import Modal from '../components/Common/Modal';
@@ -23,13 +22,9 @@ import {
 
 export default function LeadListPage() {
   const { leads: rawLeads, deleteLead, forms, leadOptions } = useApp();
-  const { user } = useAuth();
-  const { permissions = [], role } = useSelector((state) => state.auth || {});
-  const normalizedRole = String(role || '').toLowerCase();
-  const hasAny = (...codes) => (
-    normalizedRole === 'superadmin' || normalizedRole === 'admin' || codes.some((code) => permissions.includes(code))
-  );
-  const isAdmin = user?.role === 'admin' || hasAny('assign_lead', 'view_lead_analytics');
+  const { permissions = [] } = useSelector((state) => state.auth || {});
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
+  const isAdmin = hasAny('assign_lead', 'view_lead_analytics');
   const canCreate = hasAny('create_lead');
   const canEdit = hasAny('edit_lead');
   const canDelete = hasAny('delete_lead');

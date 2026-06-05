@@ -4,7 +4,7 @@ const usePermission = () => {
   const permissions = useSelector((s) => s.auth.permissions)
   const role        = useSelector((s) => s.auth.role)
 
-  const can    = (code)   => role === 'superadmin' || permissions.includes(code)
+  const can    = (code)   => permissions.includes(code)
   const canAny = (codes)  => codes.some(can)
   const canAll = (codes)  => codes.every(can)
 

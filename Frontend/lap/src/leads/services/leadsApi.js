@@ -22,7 +22,9 @@ export const createForm = (data) =>
  * fields: array of field objects from FormBuilderPage.
  */
 export const syncFormFields = (formId, fields) =>
-  apiClient.put(`/leads/forms/${formId}/fields/`, { fields });
+  formId
+    ? apiClient.put(`/leads/forms/${formId}/fields/`, { fields })
+    : Promise.reject(new Error('A valid form is required before saving fields'));
 
 export const fetchLeadOptions = () =>
   apiClient.get('/leads/options/');

@@ -8,7 +8,8 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        token['role'] = user.role
+        token['role'] = user.get_effective_role()
+        token['is_superuser'] = user.is_superuser
         token['employee_type'] = user.employee_type
         token['tenant_id'] = user.tenant_id
         token['name'] = user.get_full_name() or user.username
@@ -47,6 +48,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         return obj.get_permissions_list()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['role'] = instance.get_effective_role()
+        return data
     
 # accounts/serializers.py  (add to existing file)
 from rest_framework import serializers

@@ -1,6 +1,5 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
 import { 
   BarChart, 
   Bar, 
@@ -30,13 +29,8 @@ const getFieldValue = (lead, label) => {
 
 export default function AnalyticsPage() {
   const { leads: rawLeads, counselors } = useApp();
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
 
-  // Role-based lead filtering
-  const leads = isAdmin
-    ? rawLeads
-    : rawLeads.filter(l => l.counselor_id === user?.id);
+  const leads = rawLeads;
 
   // ─── 1. Conversion Funnel ──────────────────────────────────────────────────
   const funnelStages = [
@@ -91,8 +85,7 @@ export default function AnalyticsPage() {
     .sort((a, b) => b.count - a.count);
 
   // ─── 3. Counselor Performance Rankings (live data) ────────────────────────
-  // Only counselors (not admins) in the list
-  const counselorList = counselors.filter(c => c.role === 'counselor');
+  const counselorList = counselors;
 
   const counselorsPerformance = counselorList.map(c => {
     // Match leads by counselor_id (FK on lead) or counselor object id

@@ -3,6 +3,15 @@ from django.db import transaction
 from .models import Lead, LeadForm, LeadField, LeadFieldValue, FollowUp
 
 
+DEFAULT_CORE_FIELDS = [
+    ('Student Full Name', 'text', True, 'General Details', 10),
+    ('Email Address', 'email', False, 'General Details', 20),
+    ('Phone Number', 'text', False, 'General Details', 30),
+    ('Status', 'dropdown', False, 'Lead Management', 40),
+    ('Assigned Counselor', 'dropdown', False, 'Lead Management', 50),
+]
+
+
 # ─── Form Services ────────────────────────────────────────────────────────────
 
 def create_form(data: dict) -> LeadForm:
@@ -10,15 +19,52 @@ def create_form(data: dict) -> LeadForm:
     return form
 
 
+def ensure_default_form() -> LeadForm:
+    form, _ = LeadForm.objects.get_or_create(
+        name='Active Intake Form',
+        defaults={
+            'description': 'Default student inquiry form',
+            'is_active': True,
+        },
+    )
+    if not form.is_active:
+        form.is_active = True
+        form.save(update_fields=['is_active'])
+
+    existing_labels = set(
+        LeadField.objects.filter(form=form, is_core=True)
+        .values_list('label', flat=True)
+    )
+    for label, field_type, required, section, order in DEFAULT_CORE_FIELDS:
+        if label not in existing_labels:
+            LeadField.objects.create(
+                form=form,
+                label=label,
+                field_type=field_type,
+                required=required,
+                section=section,
+                is_core=True,
+                order=order,
+                options=['New', 'Contacted', 'Interested', 'Follow-Up Pending', 'Admission Confirmed', 'Rejected']
+                if label == 'Status' else None,
+            )
+    return form
+
+
 def get_forms(skip: int = 0, limit: int = 100):
+    ensure_default_form()
     return LeadForm.objects.all()[skip:skip + limit]
 
 
 def get_form(form_id: int) -> Optional[LeadForm]:
     try:
         return LeadForm.objects.get(id=form_id)
-    except LeadForm.DoesNotExist:
+    except (LeadForm.DoesNotExist, TypeError, ValueError):
         return None
+
+
+def get_active_form() -> LeadForm:
+    return LeadForm.objects.filter(is_active=True).order_by('-created_at').first() or ensure_default_form()
 
 
 def add_field(form_id: int, field_data: dict) -> LeadField:
@@ -114,8 +160,13 @@ def sync_fields(form_id: int, fields_data: list) -> List[LeadField]:
 @transaction.atomic
 def create_lead(data: dict) -> Lead:
     dynamic_fields = data.pop('dynamic_fields', [])
+    form = get_form(data.get('form_id')) or get_active_form()
+    data['form_id'] = form.id
     lead = Lead.objects.create(**data)
+    valid_field_ids = set(form.fields.values_list('id', flat=True))
     for fv in dynamic_fields:
+        if fv.get('field_id') not in valid_field_ids:
+            continue
         LeadFieldValue.objects.create(
             lead_id=lead.id,
             field_id=fv['field_id'],
@@ -154,13 +205,18 @@ def update_lead(lead_id: int, data: dict) -> Optional[Lead]:
         return None
 
     dynamic_fields = data.pop('dynamic_fields', None)
+    if data.get('form_id') and not get_form(data.get('form_id')):
+        data['form_id'] = get_active_form().id
     for key, value in data.items():
         setattr(lead, key, value)
     lead.save()
 
     if dynamic_fields is not None:
         LeadFieldValue.objects.filter(lead_id=lead_id).delete()
+        valid_field_ids = set(lead.form.fields.values_list('id', flat=True))
         for fv in dynamic_fields:
+            if fv.get('field_id') not in valid_field_ids:
+                continue
             LeadFieldValue.objects.create(
                 lead_id=lead_id,
                 field_id=fv['field_id'],

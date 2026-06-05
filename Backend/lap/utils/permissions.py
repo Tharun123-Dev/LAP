@@ -19,10 +19,8 @@ def make_permission(code):
         def has_permission(self, request, view):
             if not request.user or not request.user.is_authenticated:
                 return False
-            # Superadmin and Admin always have full access
-            if request.user.role in ('superadmin', 'admin'):
+            if request.user.is_superuser:
                 return True
-            # All other users: check explicit override only
             return request.user.has_perm_code(self.perm_code)
 
     DynamicPermission.__name__ = f'Permission_{code}'
@@ -36,7 +34,7 @@ def make_any_permission(*codes):
         def has_permission(self, request, view):
             if not request.user or not request.user.is_authenticated:
                 return False
-            if request.user.role in ('superadmin', 'admin'):
+            if request.user.is_superuser:
                 return True
             return any(request.user.has_perm_code(code) for code in self.perm_codes)
 
@@ -58,5 +56,5 @@ class IsSuperAdmin(BasePermission):
         return (
             request.user and
             request.user.is_authenticated and
-            request.user.role == 'superadmin'
+            request.user.is_superuser
         )

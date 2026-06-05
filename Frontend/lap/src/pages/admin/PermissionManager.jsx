@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
+import { useDispatch } from 'react-redux'
 import { getAllRolesPermissionsApi, updateRolePermissionsApi } from '../../api/services/permissions'
+import { getMeApi } from '../../api/services/users'
+import { syncAuthUser } from '../../store/authSlice'
 import toast from 'react-hot-toast'
 
-const ROLES = ['superadmin', 'admin', 'manager', 'hr', 'employee']
-const COLORS = { superadmin: '#6d28d9', admin: '#1d4ed8', manager: '#047857', hr: '#b45309', employee: '#374151' }
+const ROLES = ['superadmin', 'admin', 'manager', 'hr', 'counselor', 'employee']
+const COLORS = { superadmin: '#6d28d9', admin: '#1d4ed8', manager: '#047857', hr: '#b45309', counselor: '#be185d', employee: '#374151' }
 
 export default function PermissionManager() {
+  const dispatch = useDispatch()
   const [data, setData]           = useState({})
   const [activeRole, setRole]     = useState('admin')
   const [loading, setLoading]     = useState(false)
@@ -33,6 +37,8 @@ export default function PermissionManager() {
     const revoked = perms.filter((p) => !p.is_granted).map((p) => p.code)
     try {
       await updateRolePermissionsApi(activeRole, granted, revoked)
+      const me = await getMeApi()
+      dispatch(syncAuthUser(me.data))
       toast.success(`Saved for ${activeRole}!`)
       setChanged({})
     } catch { toast.error('Save failed') }
@@ -53,7 +59,7 @@ export default function PermissionManager() {
     <div style={{ padding: '32px', fontFamily: 'Inter, sans-serif', background: '#f9fafb', minHeight: '100vh' }}>
       <h2 style={{ fontSize: '22px', fontWeight: 700, color: '#111', margin: 0 }}>Permission Manager</h2>
       <p style={{ color: '#888', fontSize: '13px', marginTop: '4px', marginBottom: '24px' }}>
-        Changes take effect on next login.
+        Changes sync automatically for logged-in users.
       </p>
 
       {/* Role tabs */}

@@ -77,18 +77,18 @@ export const LeadAppProvider = ({ children }) => {
   const lapUser = typeof rawUser === 'string'
     ? { id: auth.userId, full_name: rawUser, role: auth.role }
     : rawUser;
-  const lapRole = String(auth.role || lapUser?.role || lapUser?.user_type || '').toLowerCase();
+  const permissions = auth.permissions || [];
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
 
   const user = useMemo(() => {
     if (!lapUser && !auth.role) return null;
-    const adminRoles = ['admin', 'hr', 'manager', 'superadmin'];
     return {
       id: lapUser?.id,
       full_name: getUserName(lapUser) || auth.user || 'User',
       email: lapUser?.email || '',
-      role: lapUser?.is_superuser || adminRoles.includes(lapRole) ? 'admin' : 'counselor',
+      role: hasAny('assign_lead', 'view_lead_analytics', 'manage_lead_forms') ? 'admin' : 'counselor',
     };
-  }, [auth.role, auth.user, lapRole, lapUser]);
+  }, [auth.role, auth.user, lapUser, permissions]);
 
   const [leads, setLeads] = useState([]);
   const [followups, setFollowups] = useState([]);

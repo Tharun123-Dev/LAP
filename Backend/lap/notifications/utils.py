@@ -41,38 +41,15 @@ def notify_permission(perm_code, title, body, notif_type='general', exclude_user
     This is the key function — only people who CAN act on something get notified.
     """
     from accounts.models import User
-    from utils.models import RolePermission, UserPermissionOverride
+    from utils.models import UserPermissionOverride
     from .models import Notification
 
-    # 1. Get base roles that have this permission
-    roles_with_perm = set(
-        RolePermission.objects.filter(
-            permission__code=perm_code, is_granted=True
-        ).values_list('role', flat=True)
-    )
-
-    # 2. Users via role
-    qs = User.objects.filter(role__in=roles_with_perm, is_active=True)
-    if exclude_user:
-        qs = qs.filter(tenant_id=getattr(exclude_user, 'tenant_id', 'default'))
-
-    # 3. Add users with override grant
-    override_granted = set(
+    all_user_ids = set(
         UserPermissionOverride.objects.filter(
             permission__code=perm_code, is_granted=True
         ).values_list('user_id', flat=True)
     )
-
-    # 4. Remove users with override revoke
-    override_revoked = set(
-        UserPermissionOverride.objects.filter(
-            permission__code=perm_code, is_granted=False
-        ).values_list('user_id', flat=True)
-    )
-
-    all_user_ids = (
-        set(qs.values_list('id', flat=True)) | override_granted
-    ) - override_revoked
+    all_user_ids.update(User.objects.filter(is_superuser=True, is_active=True).values_list('id', flat=True))
 
     if exclude_user:
         all_user_ids.discard(exclude_user.pk)
@@ -195,8 +172,8 @@ def notify_new_employee(new_user, created_by):
     creator_name = created_by.get_full_name() or created_by.username
     creator_role = created_by.get_display_role()
 
-    notify_role(
-        roles=['superadmin', 'admin'],
+    notify_permission(
+        perm_code='view_employees',
         title=f"New Employee: {name}",
         body=(
             f"{name} ({new_user.get_display_role()}) has been added by "

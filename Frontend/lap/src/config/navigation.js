@@ -72,26 +72,4 @@ export const NAV_ITEMS = [
   { label: 'Revenue', path: '/dashboard/revenue', icon: 'revenue', codes: ['view_revenue', 'manage_revenue'], children: REVENUE_NAV_ITEMS },
 ]
 
-// Superadmin sees everything always (bypasses permission check)
-export const SUPERADMIN_NAV = [
-  { label: 'Dashboard',       path: '/dashboard',                 icon: '/icons/dashboard.png'        },
-  { label: 'Employees',       path: '/dashboard/employees',       icon: '/icons/employees.png'        },
-  { label: 'Departments',     path: '/dashboard/departments',     icon: '/icons/departments.png'      },
-  { label: 'Attendance',      path: '/dashboard/attendance',      icon: '/icons/attendance.png'       },
-  { label: 'Leave',           path: '/dashboard/leave',           icon: '/icons/leave.png'            },
-  { label: 'Payroll',         path: '/dashboard/payroll',         icon: '/icons/payroll.png'          },
-  { label: 'Support Tickets', path: '/dashboard/support-tickets', icon: '/icons/notifications.png'    },
-  { label: 'Reports',         path: '/dashboard/reports',         icon: '/icons/reports.png'          },
-  { label: 'Self Reports',    path: '/dashboard/self-reports',    icon: '/icons/reports.png'          },
-  { label: 'Permissions',     path: '/dashboard/permissions',     icon: '/icons/permissions.png'      },
-  { label: 'Notifications',   path: '/dashboard/notifications',   icon: '/icons/notifications.png'    },
-  { label: 'Settings',        path: '/dashboard/settings',        icon: '/icons/settings.png'         },
-  { label: 'System Settings', path: '/dashboard/settings/system', icon: '/icons/system-settings.png'  },
-  { label: 'Affiliate Dashboard', path: '/dashboard/affiliate',       icon: '/icons/affiliate.png', children: AFFILIATE_NAV_ITEMS },
-  { label: 'Tasks', path: '/dashboard/tasks', icon: 'tasks' },
-  { label: 'Leads', path: '/dashboard/leads', icon: '/icons/leads.png', children: LEADS_NAV_ITEMS },
-  { label: 'Revenue', path: '/dashboard/revenue', icon: 'revenue', children: REVENUE_NAV_ITEMS },
-
-]
-
-export default { superadmin: SUPERADMIN_NAV, admin: SUPERADMIN_NAV }
+export default { items: NAV_ITEMS }

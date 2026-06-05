@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { logout } from '../../store/authSlice'
 import { store } from '../../store'
-import { NAV_ITEMS, SUPERADMIN_NAV } from '../../config/navigation'
+import { NAV_ITEMS } from '../../config/navigation'
 
 const iconFallback = (label) => label?.charAt(0)?.toUpperCase() || '?'
 const iconByLabel = {
@@ -80,22 +80,16 @@ export default function Sidebar({ open, onClose }) {
   }, [])
 
   const role = auth.role || 'employee'
-  const roleKey = String(role || '').toLowerCase()
   const user = auth.user
 
   const permissions = auth.permissions || []
   const canSee = (item) => {
-    if (roleKey === 'superadmin' || roleKey === 'admin') return true
     if (item.always) return true
     if (!item.codes || item.codes.length === 0) return true
     return item.codes.some((code) => permissions.includes(code))
   }
 
-  const sourceItems = roleKey === 'superadmin' || roleKey === 'admin'
-    ? SUPERADMIN_NAV
-    : NAV_ITEMS
-
-  const items = sourceItems
+  const items = NAV_ITEMS
     .filter(canSee)
     .map((item) => ({
       ...item,

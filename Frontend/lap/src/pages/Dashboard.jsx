@@ -103,7 +103,10 @@ export default function Dashboard() {
   const user     = useSelector(s => s.auth.user)
   const navigate = useNavigate()
   const { can, canAny }  = usePermission()
-  const cards    = (CARDS[role] || CARDS.employee).filter(card => !card.codes?.length || canAny(card.codes))
+  const cards    = Object.values(CARDS)
+    .flat()
+    .filter((card, index, allCards) => allCards.findIndex((item) => item.path === card.path && item.label === card.label) === index)
+    .filter(card => !card.codes?.length || canAny(card.codes))
   const width    = useWindowWidth()
   const isMobile = width <= 640
 
@@ -147,10 +150,9 @@ export default function Dashboard() {
       {/* ── Stats ────────────────────────────────────────────────────────── */}
       {!loading && stats && (
         <>
-          {role === 'employee'                               && <EmployeeStats stats={stats} navigate={navigate} isMobile={isMobile} can={can} canAny={canAny} />}
-          {(role === 'admin' || role === 'superadmin')       && <AdminStats    stats={stats} navigate={navigate} isMobile={isMobile} canAny={canAny} />}
-          {role === 'manager'                                && <ManagerStats  stats={stats} navigate={navigate} isMobile={isMobile} canAny={canAny} />}
-          {role === 'hr'                                     && <AdminStats    stats={stats} navigate={navigate} isMobile={isMobile} canAny={canAny} />}
+          {stats.scope === 'company' && <AdminStats stats={stats} navigate={navigate} isMobile={isMobile} canAny={canAny} />}
+          {stats.scope === 'team' && <ManagerStats stats={stats} navigate={navigate} isMobile={isMobile} canAny={canAny} />}
+          {(!stats.scope || stats.scope === 'personal') && <EmployeeStats stats={stats} navigate={navigate} isMobile={isMobile} can={can} canAny={canAny} />}
         </>
       )}
 
@@ -217,10 +219,10 @@ export default function Dashboard() {
       </div>
 
       {/* ── Deduction sections ───────────────────────────────────────────── */}
-      {role === 'employee' && can('view_payslip') && (
+      {can('view_payslip') && (
         <DeductionHistorySection isMobile={isMobile} />
       )}
-      {(role === 'admin' || role === 'superadmin' || role === 'hr') && canAny(['view_payroll', 'process_payroll']) && (
+      {canAny(['view_payroll', 'process_payroll']) && (
         <AdminDeductionSection isMobile={isMobile} />
       )}
     </div>

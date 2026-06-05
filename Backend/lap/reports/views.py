@@ -20,7 +20,7 @@ def csv_response(headers, rows, filename):
 
 
 def has_all_reports(request):
-    return request.user.role in ('superadmin', 'admin') or request.user.has_perm_code('view_reports')
+    return request.user.has_perm_code('view_reports')
 
 
 def self_reports_only(request):

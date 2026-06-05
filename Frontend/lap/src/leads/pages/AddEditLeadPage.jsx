@@ -9,11 +9,8 @@ export default function AddEditLeadPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { leads, forms, formFields, counselors, leadOptions, addLead, updateLead } = useApp();
-  const { permissions = [], role } = useSelector((state) => state.auth || {});
-  const normalizedRole = String(role || '').toLowerCase();
-  const hasAny = (...codes) => (
-    ['superadmin', 'admin'].includes(normalizedRole) || codes.some((code) => permissions.includes(code))
-  );
+  const { permissions = [] } = useSelector((state) => state.auth || {});
+  const hasAny = (...codes) => codes.some((code) => permissions.includes(code));
   const canAssign = hasAny('assign_lead');
 
   const isEditMode = !!id;
@@ -24,7 +21,7 @@ export default function AddEditLeadPage() {
 
   React.useEffect(() => {
     if (forms && forms.length > 0 && selectedFormId === null) {
-      if (isEditMode && leadToEdit?.form_id) {
+      if (isEditMode && leadToEdit?.form_id && forms.some((form) => form.id === leadToEdit.form_id)) {
         setSelectedFormId(leadToEdit.form_id);
       } else {
         const activeForm = forms.find(f => f.name === "Active Intake Form");
@@ -32,6 +29,14 @@ export default function AddEditLeadPage() {
       }
     }
   }, [forms, selectedFormId, isEditMode, leadToEdit]);
+
+  React.useEffect(() => {
+    if (!forms?.length || selectedFormId === null) return;
+    if (!forms.some((form) => form.id === selectedFormId)) {
+      const activeForm = forms.find(f => f.name === "Active Intake Form");
+      setSelectedFormId(activeForm ? activeForm.id : forms[0].id);
+    }
+  }, [forms, selectedFormId]);
 
   React.useEffect(() => {
     if (!leadToEdit) return;
@@ -91,7 +96,7 @@ export default function AddEditLeadPage() {
       email: null,
       phone: null,
       status: 'New',
-      form_id: selectedFormId || (forms && forms[0]?.id) || 1,
+      form_id: selectedFormId || (forms && forms[0]?.id) || null,
       dynamic_fields: []
     };
 
@@ -159,7 +164,7 @@ export default function AddEditLeadPage() {
           <p className="text-xs text-slate-400 mt-0.5 mb-3">
             {isEditMode ? 'Make adjustments to lead status or custom fields answers below.' : 'Populate details to assign counselor and course preferences.'}
           </p>
-          {!isEditMode && forms && forms.length > 0 && (
+          {!isEditMode && forms && forms.length > 0 && selectedFormId && (
             <select 
               value={selectedFormId || ''}
               onChange={(e) => setSelectedFormId(Number(e.target.value))}

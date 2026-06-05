@@ -53,7 +53,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
     first_name    = serializers.CharField()
     last_name     = serializers.CharField()
     password      = serializers.CharField(write_only=True)
-    role          = serializers.ChoiceField(choices=['manager', 'hr', 'counselor', 'employee'])
+    role          = serializers.ChoiceField(choices=['superadmin', 'admin', 'manager', 'hr', 'counselor', 'employee'])
     employee_type = serializers.ChoiceField(choices=['regular', 'contract', 'parttime', 'intern'])
     custom_role   = serializers.IntegerField(required=False, allow_null=True)  # CustomRole id
 
@@ -97,7 +97,7 @@ class CreateEmployeeSerializer(serializers.Serializer):
     def create(self, validated_data):
         from accounts.models import CustomRole
         from utils.models import Permission, UserPermissionOverride
-        from notifications.utils import notify_role
+        from notifications.utils import notify_permission
 
         permission_overrides = validated_data.pop('permission_overrides', [])
         custom_role_id = validated_data.pop('custom_role', None)
@@ -149,9 +149,8 @@ class CreateEmployeeSerializer(serializers.Serializer):
             except Permission.DoesNotExist:
                 pass
 
-        # Notify admins/superadmins of new employee
-        notify_role(
-            roles=['superadmin', 'admin'],
+        notify_permission(
+            perm_code='view_employees',
             title=f"New Employee Added: {user.get_full_name()}",
             body=f"{user.get_full_name()} ({user.get_display_role()}) has been added to the system.",
             notif_type='new_account'
