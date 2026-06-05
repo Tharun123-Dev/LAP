@@ -113,6 +113,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'https://lap-phi.vercel.app',
     'https://lapsystem.vercel.app',
+   ' https://lap-main-21.vercel.app',
 ]
 
 # Also include any FRONTEND_URL set via Render env var
@@ -128,6 +129,7 @@ CSRF_TRUSTED_ORIGINS = [
     'https://lap-phi.vercel.app',
     'https://lapsystem.vercel.app',
     'https://lap-b9vi.onrender.com',
+    'https://lap-main-21.vercel.app',
 ]
 
 # ── REST FRAMEWORK ───────────────────────────────────────────────
